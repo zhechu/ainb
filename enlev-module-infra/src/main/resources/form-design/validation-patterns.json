@@ -1,0 +1,243 @@
+{
+  "libraryVersion": 1,
+  "_comment": [
+    "内置正则库。前后端各一份副本，改动必须同步（见同目录 SYNC.md）。",
+    "",
+    "【关键约束：正则必须落在 Java 与 JavaScript 的公共子集内】",
+    "同一个 pattern 字符串会分别交给 java.util.regex.Pattern 与 JS 的 RegExp 编译。",
+    "两个引擎在以下地方行为不同，本文件一律回避：",
+    "  - 后顾断言 (?<=) —— Java 支持，旧版 JS 引擎不支持",
+    "  - 命名分组 (?<name>) —— 两侧语法一致但历史兼容性差",
+    "  - \\p{...} Unicode 属性 —— Java 与 JS(u 标志) 的族名不通用",
+    "  - \\d \\w —— 两侧虽都是 ASCII 语义，但一旦有人给 JS 加 u 标志就会漂移，",
+    "    因此统一写成显式字符类 [0-9] [A-Za-z0-9]",
+    "前顾断言 (?!) 两侧都支持，可以用。",
+    "",
+    "【中文字符写成 \\\\u4e00 而不是直接写汉字】",
+    "本文件保持纯 ASCII。Windows 下工具链按本地字符集读文件的坑已经踩过一次",
+    "（见 xpy-2026-09-08 DDL 的注释），正则里的汉字被改写成乱码不会报错，",
+    "只会让「车牌号」这类校验对所有输入都判不通过。",
+    "\\u4e00-\\u9fa5 这个转义 Java 与 JS 的正则引擎都认。",
+    "",
+    "【message 是兜底提示】",
+    "字段上没配自定义提示时用它。提示语只说「该填成什么样」，不重复字段名 ——",
+    "字段名由校验器在拼接时加上，写在这里会变成「手机号请输入正确的手机号」。"
+  ],
+  "patterns": [
+    {
+      "key": "MOBILE",
+      "label": "手机号",
+      "pattern": "^1[3-9][0-9]{9}$",
+      "message": "请输入 11 位手机号"
+    },
+    {
+      "key": "TELEPHONE",
+      "label": "固定电话",
+      "pattern": "^0[0-9]{1,3}-?[0-9]{7,8}$",
+      "message": "请输入固定电话，如 010-12345678"
+    },
+    {
+      "key": "EMAIL",
+      "label": "邮箱",
+      "pattern": "^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$",
+      "message": "请输入正确的邮箱地址"
+    },
+    {
+      "key": "ID_CARD",
+      "label": "身份证",
+      "pattern": "^[1-9][0-9]{5}(19|20)[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])[0-9]{3}[0-9Xx]$",
+      "message": "请输入 18 位身份证号",
+      "_comment": "只校验格式，不校验最后一位校验码 —— 校验码要算加权和，正则表达不了。真正需要严格校验的场景应当在服务端扩展点里做"
+    },
+    {
+      "key": "USCC",
+      "label": "统一社会信用代码",
+      "pattern": "^[0-9A-HJ-NPQRTUWXY]{2}[0-9]{6}[0-9A-HJ-NPQRTUWXY]{10}$",
+      "message": "请输入 18 位统一社会信用代码",
+      "_comment": "字符集里没有 I O S V Z —— 国标 GB32100 明确排除这五个字母，因为它们与数字 1 0 5 2 易混"
+    },
+    {
+      "key": "BANK_CARD",
+      "label": "银行卡号",
+      "pattern": "^[0-9]{12,19}$",
+      "message": "请输入 12~19 位银行卡号"
+    },
+    {
+      "key": "URL",
+      "label": "网址",
+      "pattern": "^https?://[^\\s/?#]+[^\\s]*$",
+      "message": "请输入以 http:// 或 https:// 开头的网址"
+    },
+    {
+      "key": "IPV4",
+      "label": "IP 地址",
+      "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$",
+      "message": "请输入正确的 IPv4 地址"
+    },
+    {
+      "key": "ZIP_CODE",
+      "label": "邮政编码",
+      "pattern": "^[1-9][0-9]{5}$",
+      "message": "请输入 6 位邮政编码"
+    },
+    {
+      "key": "PLATE_NUMBER",
+      "label": "车牌号",
+      "pattern": "^[\\u4e00-\\u9fa5][A-Z][A-Z0-9]{5,6}$",
+      "message": "请输入正确的车牌号，如 京A12345",
+      "_comment": "5~6 位尾段同时容纳普通车牌(7 位)与新能源车牌(8 位)。不逐位区分新能源的字母位规则：那套规则各地在变，写死会让合法车牌被拦"
+    },
+    {
+      "key": "AMOUNT",
+      "label": "金额",
+      "pattern": "^-?[0-9]+(\\.[0-9]{1,2})?$",
+      "message": "请输入金额，最多两位小数"
+    },
+    {
+      "key": "INTEGER",
+      "label": "整数",
+      "pattern": "^-?[0-9]+$",
+      "message": "请输入整数"
+    },
+    {
+      "key": "POSITIVE_INTEGER",
+      "label": "正整数",
+      "pattern": "^[1-9][0-9]*$",
+      "message": "请输入大于 0 的整数"
+    },
+    {
+      "key": "NUMBER",
+      "label": "数字",
+      "pattern": "^-?[0-9]+(\\.[0-9]+)?$",
+      "message": "请输入数字"
+    },
+    {
+      "key": "POSITIVE_NUMBER",
+      "label": "正数",
+      "pattern": "^(?!0+(\\.0+)?$)[0-9]+(\\.[0-9]+)?$",
+      "message": "请输入大于 0 的数字",
+      "_comment": "用前顾断言排掉 0、0.0、00 这类写法。纯字符类表达不了「大于 0」"
+    },
+    {
+      "key": "CHINESE",
+      "label": "中文",
+      "pattern": "^[\\u4e00-\\u9fa5]+$",
+      "message": "请输入中文"
+    },
+    {
+      "key": "ALPHA_NUMERIC",
+      "label": "字母或数字",
+      "pattern": "^[A-Za-z0-9]+$",
+      "message": "只能输入字母或数字"
+    },
+    {
+      "key": "ALPHA_NUMERIC_UNDERSCORE",
+      "label": "字母数字下划线",
+      "pattern": "^[A-Za-z0-9_]+$",
+      "message": "只能输入字母、数字或下划线"
+    }
+  ],
+  "_casesComment": [
+    "跨端一致性用例集。前端(Vitest)与后端(JUnit)读同一份，各跑一遍。",
+    "",
+    "为什么要有它：同一个正则字符串交给两个不同的引擎，未必得到同样的结果。",
+    "一旦漂移，表现是「界面上填好了但提交失败」或反过来「该拦的没拦住」，",
+    "而用户完全看不出哪里不对。用例集把这类漂移变成一侧测试红。",
+    "",
+    "用例与正则放在同一个文件里，是为了少一份需要同步的副本 ——",
+    "两份文件就有两次忘记同步的机会。",
+    "",
+    "  key       内置正则的 key",
+    "  value     待校验的值",
+    "  expected  期望是否匹配"
+  ],
+  "cases": [
+    { "key": "MOBILE", "value": "13812345678", "expected": true },
+    { "key": "MOBILE", "value": "12812345678", "expected": false },
+    { "key": "MOBILE", "value": "1381234567", "expected": false },
+    { "key": "MOBILE", "value": "138123456789", "expected": false },
+    { "key": "MOBILE", "value": "138 1234 5678", "expected": false },
+    { "key": "MOBILE", "value": "13812345678 ", "expected": false },
+
+    { "key": "TELEPHONE", "value": "010-12345678", "expected": true },
+    { "key": "TELEPHONE", "value": "0571-1234567", "expected": true },
+    { "key": "TELEPHONE", "value": "01012345678", "expected": true },
+    { "key": "TELEPHONE", "value": "12345678", "expected": false },
+
+    { "key": "EMAIL", "value": "a@b.com", "expected": true },
+    { "key": "EMAIL", "value": "first.last+tag@sub.example.com", "expected": true },
+    { "key": "EMAIL", "value": "a@b", "expected": false },
+    { "key": "EMAIL", "value": "@b.com", "expected": false },
+    { "key": "EMAIL", "value": "a b@c.com", "expected": false },
+
+    { "key": "ID_CARD", "value": "110101199001011234", "expected": true },
+    { "key": "ID_CARD", "value": "11010119900101123X", "expected": true },
+    { "key": "ID_CARD", "value": "11010119900101123x", "expected": true },
+    { "key": "ID_CARD", "value": "110101199013011234", "expected": false },
+    { "key": "ID_CARD", "value": "110101199001321234", "expected": false },
+    { "key": "ID_CARD", "value": "11010119900101123", "expected": false },
+
+    { "key": "USCC", "value": "91350100M000100Y43", "expected": true },
+    { "key": "USCC", "value": "91350100I000100Y43", "expected": false },
+    { "key": "USCC", "value": "91350100M000100Y4", "expected": false },
+
+    { "key": "BANK_CARD", "value": "6222020200112345678", "expected": true },
+    { "key": "BANK_CARD", "value": "62220202001", "expected": false },
+    { "key": "BANK_CARD", "value": "6222-0202-0011-2345", "expected": false },
+
+    { "key": "URL", "value": "https://example.com", "expected": true },
+    { "key": "URL", "value": "http://example.com/a/b?c=1#d", "expected": true },
+    { "key": "URL", "value": "ftp://example.com", "expected": false },
+    { "key": "URL", "value": "example.com", "expected": false },
+
+    { "key": "IPV4", "value": "192.168.1.1", "expected": true },
+    { "key": "IPV4", "value": "0.0.0.0", "expected": true },
+    { "key": "IPV4", "value": "255.255.255.255", "expected": true },
+    { "key": "IPV4", "value": "256.1.1.1", "expected": false },
+    { "key": "IPV4", "value": "192.168.1", "expected": false },
+
+    { "key": "ZIP_CODE", "value": "310000", "expected": true },
+    { "key": "ZIP_CODE", "value": "010000", "expected": false },
+
+    { "key": "PLATE_NUMBER", "value": "京A12345", "expected": true },
+    { "key": "PLATE_NUMBER", "value": "浙A12345D", "expected": true },
+    { "key": "PLATE_NUMBER", "value": "A12345", "expected": false },
+    { "key": "PLATE_NUMBER", "value": "京a12345", "expected": false },
+
+    { "key": "AMOUNT", "value": "100", "expected": true },
+    { "key": "AMOUNT", "value": "100.5", "expected": true },
+    { "key": "AMOUNT", "value": "100.50", "expected": true },
+    { "key": "AMOUNT", "value": "-100.50", "expected": true },
+    { "key": "AMOUNT", "value": "100.505", "expected": false },
+    { "key": "AMOUNT", "value": "100.", "expected": false },
+    { "key": "AMOUNT", "value": "1,000", "expected": false },
+
+    { "key": "INTEGER", "value": "0", "expected": true },
+    { "key": "INTEGER", "value": "-12", "expected": true },
+    { "key": "INTEGER", "value": "1.0", "expected": false },
+
+    { "key": "POSITIVE_INTEGER", "value": "1", "expected": true },
+    { "key": "POSITIVE_INTEGER", "value": "0", "expected": false },
+    { "key": "POSITIVE_INTEGER", "value": "01", "expected": false },
+    { "key": "POSITIVE_INTEGER", "value": "-1", "expected": false },
+
+    { "key": "NUMBER", "value": "-0.5", "expected": true },
+    { "key": "NUMBER", "value": ".5", "expected": false },
+
+    { "key": "POSITIVE_NUMBER", "value": "0.01", "expected": true },
+    { "key": "POSITIVE_NUMBER", "value": "1", "expected": true },
+    { "key": "POSITIVE_NUMBER", "value": "0", "expected": false },
+    { "key": "POSITIVE_NUMBER", "value": "0.0", "expected": false },
+    { "key": "POSITIVE_NUMBER", "value": "00", "expected": false },
+    { "key": "POSITIVE_NUMBER", "value": "-1", "expected": false },
+
+    { "key": "CHINESE", "value": "你好", "expected": true },
+    { "key": "CHINESE", "value": "你好hello", "expected": false },
+
+    { "key": "ALPHA_NUMERIC", "value": "abc123", "expected": true },
+    { "key": "ALPHA_NUMERIC", "value": "abc_123", "expected": false },
+
+    { "key": "ALPHA_NUMERIC_UNDERSCORE", "value": "abc_123", "expected": true },
+    { "key": "ALPHA_NUMERIC_UNDERSCORE", "value": "abc-123", "expected": false }
+  ]
+}

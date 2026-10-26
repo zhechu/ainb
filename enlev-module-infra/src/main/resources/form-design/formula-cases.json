@@ -1,0 +1,598 @@
+{
+  "_comment": [
+    "公式求值器的跨端一致性用例集。",
+    "",
+    "前端（Vitest）与后端（JUnit）读同一份用例各跑一遍。任一侧行为漂移，那一侧就会红。",
+    "",
+    "## 为什么需要两个求值器",
+    "",
+    "前端那份负责录入时的即时反馈 —— 改一个数字，合计立刻跟着变。",
+    "后端那份是【权威】：提交时用同一份 AST 重算并覆盖前端提交的值。",
+    "",
+    "只有前端算的话，构造一个请求就能写入任意金额 —— 对财务类表单这是实打实的资损漏洞。",
+    "两边算得不一样则更糟：用户看到的合计与入库的合计不同，且没有任何报错。",
+    "所以每一个函数、每一条舍入规则都要有用例钉住。",
+    "",
+    "## 架构：一个 parser，两个 evaluator",
+    "",
+    "表达式只在前端解析一次（设计期），产出与语言无关的 AST JSON 存进表单规则。",
+    "两端都只实现 AST 求值，不实现解析 —— 少一套 parser 就少一半漂移面。",
+    "",
+    "## AST 节点",
+    "",
+    "  {\"type\":\"num\",   \"value\": 1}                              数字字面量",
+    "  {\"type\":\"str\",   \"value\": \"x\"}                            字符串字面量",
+    "  {\"type\":\"bool\",  \"value\": true}                           布尔字面量",
+    "  {\"type\":\"field\", \"name\": \"amount\"}                       字段引用",
+    "  {\"type\":\"subfield\",\"sub\":\"items\",\"field\":\"price\"}       子表字段引用（仅聚合函数可用）",
+    "  {\"type\":\"unary\", \"op\":\"-\",  \"operand\": {...}}           一元运算",
+    "  {\"type\":\"binary\",\"op\":\"+\",  \"left\":{...},\"right\":{...}} 二元运算",
+    "  {\"type\":\"call\",  \"name\":\"ROUND\",\"args\":[{...}]}         函数调用",
+    "",
+    "## 求值约定（两端必须一致）",
+    "",
+    "1. 空值参与算术按 0 处理 —— 表单里没填的数字字段拿到的是 null，",
+    "   按 0 算才符合「合计栏应该显示已填部分的和」这一直觉。",
+    "2. 除数为 0 返回 null，不抛异常。一个配歪的公式不该让整张表单打不开。",
+    "3. 任何求值错误都返回 null 并记录，不抛异常。",
+    "4. 数值一律用高精度十进制运算，不用浮点 —— 0.1+0.2 必须等于 0.3，",
+    "   金额字段用浮点会算出 0.30000000000000004 并原样入库。",
+    "5. 字符串与数字比较、拼接时的转换规则见用例。",
+    "",
+    "## 用例字段",
+    "",
+    "  name      用例名",
+    "  ast       待求值的 AST",
+    "  data      表单数据。子表数据是对象数组",
+    "  expect    期望值。null 表示应当算出 null",
+    "  precision 可选，结果保留几位小数",
+    "  rounding  可选，舍入方式：HALF_UP / CEIL / FLOOR"
+  ],
+
+  "casesVersion": 1,
+
+  "cases": [
+    {
+      "name": "数字字面量",
+      "ast": { "type": "num", "value": 42 },
+      "data": {},
+      "expect": 42
+    },
+    {
+      "name": "字段引用",
+      "ast": { "type": "field", "name": "amount" },
+      "data": { "amount": 100 },
+      "expect": 100
+    },
+    {
+      "name": "⚠️ 字段值是字符串时按数字参与运算：表单里的数值往往是字符串",
+      "ast": {
+        "type": "binary",
+        "op": "+",
+        "left": { "type": "field", "name": "a" },
+        "right": { "type": "num", "value": 1 }
+      },
+      "data": { "a": "10" },
+      "expect": 11
+    },
+    {
+      "name": "⚠️ 空值参与算术按 0 处理",
+      "ast": {
+        "type": "binary",
+        "op": "+",
+        "left": { "type": "field", "name": "filled" },
+        "right": { "type": "field", "name": "missing" }
+      },
+      "data": { "filled": 5 },
+      "expect": 5
+    },
+    {
+      "name": "四则运算与优先级（AST 已定型，这里验算术本身）",
+      "ast": {
+        "type": "binary",
+        "op": "+",
+        "left": { "type": "num", "value": 2 },
+        "right": {
+          "type": "binary",
+          "op": "*",
+          "left": { "type": "num", "value": 3 },
+          "right": { "type": "num", "value": 4 }
+        }
+      },
+      "data": {},
+      "expect": 14
+    },
+    {
+      "name": "⚠️ 高精度十进制：0.1 + 0.2 必须等于 0.3",
+      "_note": "用浮点会算出 0.30000000000000004 并原样入库，金额字段上这是硬伤",
+      "ast": {
+        "type": "binary",
+        "op": "+",
+        "left": { "type": "num", "value": 0.1 },
+        "right": { "type": "num", "value": 0.2 }
+      },
+      "data": {},
+      "expect": 0.3
+    },
+    {
+      "name": "⚠️ 高精度十进制：1.1 * 3 必须等于 3.3",
+      "ast": {
+        "type": "binary",
+        "op": "*",
+        "left": { "type": "num", "value": 1.1 },
+        "right": { "type": "num", "value": 3 }
+      },
+      "data": {},
+      "expect": 3.3
+    },
+    {
+      "name": "除法",
+      "ast": {
+        "type": "binary",
+        "op": "/",
+        "left": { "type": "num", "value": 10 },
+        "right": { "type": "num", "value": 4 }
+      },
+      "data": {},
+      "expect": 2.5
+    },
+    {
+      "name": "⚠️ 除数为 0 返回 null，不抛异常",
+      "ast": {
+        "type": "binary",
+        "op": "/",
+        "left": { "type": "num", "value": 1 },
+        "right": { "type": "num", "value": 0 }
+      },
+      "data": {},
+      "expect": null
+    },
+    {
+      "name": "⚠️ 除数是空字段（按 0）时同样返回 null",
+      "ast": {
+        "type": "binary",
+        "op": "/",
+        "left": { "type": "num", "value": 1 },
+        "right": { "type": "field", "name": "missing" }
+      },
+      "data": {},
+      "expect": null
+    },
+    {
+      "name": "取模",
+      "ast": {
+        "type": "binary",
+        "op": "%",
+        "left": { "type": "num", "value": 10 },
+        "right": { "type": "num", "value": 3 }
+      },
+      "data": {},
+      "expect": 1
+    },
+    {
+      "name": "一元负号",
+      "ast": { "type": "unary", "op": "-", "operand": { "type": "field", "name": "a" } },
+      "data": { "a": 5 },
+      "expect": -5
+    },
+
+    {
+      "name": "ROUND 默认四舍五入到整数",
+      "ast": { "type": "call", "name": "ROUND", "args": [{ "type": "num", "value": 2.5 }] },
+      "data": {},
+      "expect": 3
+    },
+    {
+      "name": "ROUND 指定小数位",
+      "ast": {
+        "type": "call",
+        "name": "ROUND",
+        "args": [{ "type": "num", "value": 3.14159 }, { "type": "num", "value": 2 }]
+      },
+      "data": {},
+      "expect": 3.14
+    },
+    {
+      "name": "⚠️ ROUND 用 HALF_UP 而非银行家舍入：1.005 保留两位是 1.01",
+      "_note": "多数语言的默认舍入是 HALF_EVEN（银行家舍入），1.005 会舍成 1.00，与用户直觉不符",
+      "ast": {
+        "type": "call",
+        "name": "ROUND",
+        "args": [{ "type": "num", "value": 1.005 }, { "type": "num", "value": 2 }]
+      },
+      "data": {},
+      "expect": 1.01
+    },
+    {
+      "name": "CEIL / FLOOR / ABS",
+      "ast": {
+        "type": "binary",
+        "op": "+",
+        "left": {
+          "type": "binary",
+          "op": "+",
+          "left": { "type": "call", "name": "CEIL", "args": [{ "type": "num", "value": 1.2 }] },
+          "right": { "type": "call", "name": "FLOOR", "args": [{ "type": "num", "value": 1.8 }] }
+        },
+        "right": { "type": "call", "name": "ABS", "args": [{ "type": "num", "value": -3 }] }
+      },
+      "data": {},
+      "expect": 6
+    },
+    {
+      "name": "MAX / MIN 多参数形式",
+      "ast": {
+        "type": "call",
+        "name": "MAX",
+        "args": [
+          { "type": "num", "value": 1 },
+          { "type": "field", "name": "b" },
+          { "type": "num", "value": 3 }
+        ]
+      },
+      "data": { "b": 9 },
+      "expect": 9
+    },
+
+    {
+      "name": "SUM 子表聚合",
+      "ast": {
+        "type": "call",
+        "name": "SUM",
+        "args": [{ "type": "subfield", "sub": "items", "field": "price" }]
+      },
+      "data": { "items": [{ "price": 10 }, { "price": 20 }, { "price": 5 }] },
+      "expect": 35
+    },
+    {
+      "name": "⚠️ SUM 忽略明细里的空值，而不是整体算成 null",
+      "ast": {
+        "type": "call",
+        "name": "SUM",
+        "args": [{ "type": "subfield", "sub": "items", "field": "price" }]
+      },
+      "data": { "items": [{ "price": 10 }, { "price": null }, { "price": "20" }] },
+      "expect": 30
+    },
+    {
+      "name": "子表为空时 SUM 得 0，而不是 null",
+      "_note": "合计栏显示 0 比显示空白更符合直觉，也避免下游运算被 null 传染",
+      "ast": {
+        "type": "call",
+        "name": "SUM",
+        "args": [{ "type": "subfield", "sub": "items", "field": "price" }]
+      },
+      "data": { "items": [] },
+      "expect": 0
+    },
+    {
+      "name": "子表字段不存在时 SUM 得 0",
+      "ast": {
+        "type": "call",
+        "name": "SUM",
+        "args": [{ "type": "subfield", "sub": "items", "field": "notExists" }]
+      },
+      "data": { "items": [{ "price": 10 }] },
+      "expect": 0
+    },
+    {
+      "name": "COUNT 数明细行数，包括值为空的行",
+      "ast": {
+        "type": "call",
+        "name": "COUNT",
+        "args": [{ "type": "subfield", "sub": "items", "field": "price" }]
+      },
+      "data": { "items": [{ "price": 1 }, { "price": null }, {}] },
+      "expect": 3
+    },
+    {
+      "name": "⚠️ AVG 按有值的行数平均，空值不计入分母",
+      "ast": {
+        "type": "call",
+        "name": "AVG",
+        "args": [{ "type": "subfield", "sub": "items", "field": "price" }]
+      },
+      "data": { "items": [{ "price": 10 }, { "price": 20 }, { "price": null }] },
+      "expect": 15
+    },
+    {
+      "name": "AVG 无有值行时返回 null（0 会被误读成「平均值是 0」）",
+      "ast": {
+        "type": "call",
+        "name": "AVG",
+        "args": [{ "type": "subfield", "sub": "items", "field": "price" }]
+      },
+      "data": { "items": [{ "price": null }] },
+      "expect": null
+    },
+    {
+      "name": "MAX / MIN 的聚合形式",
+      "ast": {
+        "type": "call",
+        "name": "MIN",
+        "args": [{ "type": "subfield", "sub": "items", "field": "price" }]
+      },
+      "data": { "items": [{ "price": 7 }, { "price": 3 }, { "price": 9 }] },
+      "expect": 3
+    },
+    {
+      "name": "子表聚合参与四则运算：小计 * 税率",
+      "ast": {
+        "type": "binary",
+        "op": "*",
+        "left": {
+          "type": "call",
+          "name": "SUM",
+          "args": [{ "type": "subfield", "sub": "items", "field": "amount" }]
+        },
+        "right": { "type": "num", "value": 0.06 }
+      },
+      "data": { "items": [{ "amount": 100 }, { "amount": 200 }] },
+      "expect": 18
+    },
+
+    {
+      "name": "CONCAT 拼接，数字按原样文本化",
+      "ast": {
+        "type": "call",
+        "name": "CONCAT",
+        "args": [
+          { "type": "str", "value": "订单-" },
+          { "type": "field", "name": "no" },
+          { "type": "str", "value": "-" },
+          { "type": "num", "value": 2 }
+        ]
+      },
+      "data": { "no": 1001 },
+      "expect": "订单-1001-2"
+    },
+    {
+      "name": "CONCAT 把空值当空串，不输出 null 字样",
+      "ast": {
+        "type": "call",
+        "name": "CONCAT",
+        "args": [{ "type": "str", "value": "A" }, { "type": "field", "name": "missing" }]
+      },
+      "data": {},
+      "expect": "A"
+    },
+    {
+      "name": "LEN / TRIM / SUBSTR",
+      "ast": {
+        "type": "call",
+        "name": "LEN",
+        "args": [
+          {
+            "type": "call",
+            "name": "TRIM",
+            "args": [{ "type": "str", "value": "  abcd  " }]
+          }
+        ]
+      },
+      "data": {},
+      "expect": 4
+    },
+    {
+      "name": "SUBSTR 起始位从 1 开始计（与用户直觉一致，不是 0）",
+      "ast": {
+        "type": "call",
+        "name": "SUBSTR",
+        "args": [
+          { "type": "str", "value": "abcdef" },
+          { "type": "num", "value": 2 },
+          { "type": "num", "value": 3 }
+        ]
+      },
+      "data": {},
+      "expect": "bcd"
+    },
+
+    {
+      "name": "IF 条件为真取第二个参数",
+      "ast": {
+        "type": "call",
+        "name": "IF",
+        "args": [
+          {
+            "type": "binary",
+            "op": ">",
+            "left": { "type": "field", "name": "amount" },
+            "right": { "type": "num", "value": 100 }
+          },
+          { "type": "num", "value": 1 },
+          { "type": "num", "value": 0 }
+        ]
+      },
+      "data": { "amount": 200 },
+      "expect": 1
+    },
+    {
+      "name": "IF 条件为假取第三个参数",
+      "ast": {
+        "type": "call",
+        "name": "IF",
+        "args": [
+          {
+            "type": "binary",
+            "op": ">",
+            "left": { "type": "field", "name": "amount" },
+            "right": { "type": "num", "value": 100 }
+          },
+          { "type": "num", "value": 1 },
+          { "type": "num", "value": 0 }
+        ]
+      },
+      "data": { "amount": 50 },
+      "expect": 0
+    },
+    {
+      "name": "IFNULL 空值取兜底",
+      "ast": {
+        "type": "call",
+        "name": "IFNULL",
+        "args": [{ "type": "field", "name": "missing" }, { "type": "num", "value": 99 }]
+      },
+      "data": {},
+      "expect": 99
+    },
+    {
+      "name": "IFNULL 有值时不取兜底（0 也算有值）",
+      "ast": {
+        "type": "call",
+        "name": "IFNULL",
+        "args": [{ "type": "field", "name": "zero" }, { "type": "num", "value": 99 }]
+      },
+      "data": { "zero": 0 },
+      "expect": 0
+    },
+    {
+      "name": "比较运算符返回布尔",
+      "ast": {
+        "type": "binary",
+        "op": ">=",
+        "left": { "type": "field", "name": "a" },
+        "right": { "type": "num", "value": 10 }
+      },
+      "data": { "a": 10 },
+      "expect": true
+    },
+    {
+      "name": "AND / OR",
+      "ast": {
+        "type": "binary",
+        "op": "AND",
+        "left": {
+          "type": "binary",
+          "op": ">",
+          "left": { "type": "field", "name": "a" },
+          "right": { "type": "num", "value": 1 }
+        },
+        "right": {
+          "type": "binary",
+          "op": "<",
+          "left": { "type": "field", "name": "a" },
+          "right": { "type": "num", "value": 10 }
+        }
+      },
+      "data": { "a": 5 },
+      "expect": true
+    },
+    {
+      "name": "字符串相等比较",
+      "ast": {
+        "type": "binary",
+        "op": "=",
+        "left": { "type": "field", "name": "type" },
+        "right": { "type": "str", "value": "A" }
+      },
+      "data": { "type": "A" },
+      "expect": true
+    },
+
+    {
+      "name": "DATEDIFF 按天数差",
+      "ast": {
+        "type": "call",
+        "name": "DATEDIFF",
+        "args": [
+          { "type": "str", "value": "2026-03-10" },
+          { "type": "str", "value": "2026-03-01" }
+        ]
+      },
+      "data": {},
+      "expect": 9
+    },
+    {
+      "name": "DATEDIFF 参数不是日期时返回 null",
+      "ast": {
+        "type": "call",
+        "name": "DATEDIFF",
+        "args": [{ "type": "str", "value": "不是日期" }, { "type": "str", "value": "2026-03-01" }]
+      },
+      "data": {},
+      "expect": null
+    },
+    {
+      "name": "YEAR / MONTH / DAY",
+      "ast": {
+        "type": "call",
+        "name": "MONTH",
+        "args": [{ "type": "field", "name": "d" }]
+      },
+      "data": { "d": "2026-07-15" },
+      "expect": 7
+    },
+
+    {
+      "name": "未知函数返回 null，不抛异常",
+      "ast": { "type": "call", "name": "NOT_A_REAL_FUNC", "args": [] },
+      "data": {},
+      "expect": null
+    },
+    {
+      "name": "未知节点类型返回 null",
+      "ast": { "type": "weird", "value": 1 },
+      "data": {},
+      "expect": null
+    },
+    {
+      "name": "参数个数不对的函数返回 null",
+      "ast": { "type": "call", "name": "SUBSTR", "args": [{ "type": "str", "value": "abc" }] },
+      "data": {},
+      "expect": null
+    },
+    {
+      "name": "AST 为 null 时返回 null",
+      "ast": null,
+      "data": {},
+      "expect": null
+    },
+
+    {
+      "name": "结果精度：保留两位（HALF_UP）",
+      "ast": {
+        "type": "binary",
+        "op": "/",
+        "left": { "type": "num", "value": 10 },
+        "right": { "type": "num", "value": 3 }
+      },
+      "data": {},
+      "precision": 2,
+      "rounding": "HALF_UP",
+      "expect": 3.33
+    },
+    {
+      "name": "结果精度：进一",
+      "ast": {
+        "type": "binary",
+        "op": "/",
+        "left": { "type": "num", "value": 10 },
+        "right": { "type": "num", "value": 3 }
+      },
+      "data": {},
+      "precision": 2,
+      "rounding": "CEIL",
+      "expect": 3.34
+    },
+    {
+      "name": "结果精度：舍去",
+      "ast": {
+        "type": "binary",
+        "op": "/",
+        "left": { "type": "num", "value": 20 },
+        "right": { "type": "num", "value": 3 }
+      },
+      "data": {},
+      "precision": 2,
+      "rounding": "FLOOR",
+      "expect": 6.66
+    },
+    {
+      "name": "精度作用在整数上也生效（补零由展示层负责，值本身相等）",
+      "ast": { "type": "num", "value": 5 },
+      "data": {},
+      "precision": 2,
+      "expect": 5
+    }
+  ]
+}

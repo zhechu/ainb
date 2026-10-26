@@ -1,0 +1,2455 @@
+{
+  "_comment": [
+    "表单控件契约 —— 前后端唯一事实来源。",
+    "",
+    "为什么需要它：控件的『值类型 / 落库形态 / 可映射列类型 / 能否进子表 / 能否做列表列 / 能否查询 / 能否导出』",
+    "这些事实原先散落在前后端各处硬编码。最典型的是子表控件类型 'group'，改造前在两个仓库里重复了 6 处，",
+    "每处都写着『⚠️ 必须与另一处保持一致』—— 这正是漏改一处就静默出错的结构。",
+    "",
+    "本文件是规范副本（canonical）。前端在 src/components/FormWidgets/contracts/ 下有一份同步副本，",
+    "由 WidgetContractController 暴露的接口 + 前端一致性测试保证两份不漂移（见 SYNC.md）。",
+    "",
+    "字段说明：",
+    "  type        form-create 规则里的 type，是控件的唯一标识",
+    "  group       左侧菜单分组：basic 基础 / select 选择 / advanced 高级 / layout 布局 / display 展示 / system 系统",
+    "  supported   本模块是否支持。false 表示内核提供但我们不支持，发布校验会拒绝，避免静默出错",
+    "  valueType   值的 JS/Java 类型：none 无值(展示型) / string / number / boolean / date / array / object / file",
+    "  storage     落库形态：none 不落库 / scalar 单值 / json JSON串 / delimited 分隔串 / subTable 走明细表",
+    "  columnTypes 可映射的物理列类型族（见 JdbcTypeFamily）。空数组表示不落库",
+    "  caps        能力位，详见下方 capabilities 说明",
+    "  maskable    是否支持数据脱敏",
+    "  permissionKey 字段级权限预留占位，本阶段不参与任何逻辑（见设计方案 6.2）",
+    "",
+    "  props       控件自身的配置项（v2 新增）。只有【配错了不会报错、只会静默不生效】的控件才列出，纯样式属性不列。每项含 name/type/required/desc，受控取值给 allowedValues，需要引用别处编码的给 source。来源是 59 张真实表单的统计 + 前端属性面板定义，不是凭印象写的。"
+  ],
+  "contractVersion": 2,
+  "structural": {
+    "_comment": [
+      "跨前后端的结构性事实。改这里必须两侧同步，一致性测试会兜住。",
+      "",
+      "⚠️ subFieldSeparator 还有一个消费方在别的模块里：",
+      "enlev-module-bpm 的 BpmTaskServiceImpl.SUB_FIELD_SEPARATOR（流程节点的字段权限裁剪）。",
+      "它自台账 #101(b) 起不再是独立副本：Java 侧只有一份常量",
+      "（infra 的 api/formdesign/dto/FormResourceDescriptorDTO.SUB_FIELD_SEPARATOR），bpm 引用它，",
+      "并由 SubFieldSeparatorSingleSourceTest 把那份常量钉到本 JSON 上（不是恒真断言：一侧是",
+      "运行时解析出来的 JSON 值，一侧是编译期常量）。",
+      "旧版这里写的理由「跨模块不互相依赖内部实现」经核查是错的：bpm 的 pom 依赖 infra，",
+      "被引的常量也确实在 api 包里（api 包就是给外面引的）。",
+      "",
+      "改本项的代价：改 Java 常量 + 两条钉字面量的测试会红（WidgetContractRegistryTest#",
+      "testOtherStructuralFacts、BpmSubFieldSeparatorReferenceTest#separatorValueIsPinned，",
+      "红是设计如此）+ 把本文件 cp 到前端 + 全量 mvn install（常量会被内联进引用方的 class，",
+      "只重装 infra 的 jar 会造成静默漂移）。",
+      "两边对不上的表现是「子表字段配了权限却不生效」，或反过来把有权限的字段裁掉，",
+      "从现象很难反推到分隔符不一致。",
+      "",
+      "richTextWidgetTypes：值是 HTML 的控件。服务端要对它们做两件别的字段不做的事 ——",
+      "把内联 base64 图片转存文件服务、按白名单清洗标签（见 RichContentGuard）。",
+      "列在契约里而不是在 guard 里硬编码，是因为前端也要按它判断哪些字段要走富文本编辑器的接线。",
+      "",
+      "delimitedSeparator：storage=delimited 的控件落库时用的分隔符。",
+      "⚠️ 它同时是拆分的依据，所以选项值里【不能】含这个字符 —— 含了会让读回来的数组",
+      "比存进去的多出几项，而且不报错。FormValueSerializer 在写入时会挡住这种值。"
+    ],
+    "subTableWidgetType": "group",
+    "subFieldSeparator": ".",
+    "layoutContainerTypes": [
+      "fcRow",
+      "col",
+      "elCard",
+      "elCollapse",
+      "elCollapseItem",
+      "elTabs",
+      "elTabPane",
+      "fcTable",
+      "space",
+      "FormSteps",
+      "FormStep"
+    ],
+    "nestedRulePath": "props.rule",
+    "richTextWidgetTypes": [
+      "Editor",
+      "fcEditor"
+    ],
+    "delimitedSeparator": ","
+  },
+  "capabilities": {
+    "_comment": "能力位的含义。缺省值全为 false，契约里必须显式声明",
+    "field": "是否是数据字段（规则里有 field，参与表单值）",
+    "subTable": "能否放进子表控件内部",
+    "listColumn": "能否作为列表展示列",
+    "searchable": "能否作为列表查询条件",
+    "exportable": "能否导出",
+    "sortable": "能否作为列表排序字段"
+  },
+  "jdbcTypeFamilies": [
+    {
+      "_comment": [
+        "JDBC 列类型族。数组顺序即匹配优先级，前后端都按这个顺序做首个命中匹配。",
+        "",
+        "⚠️ 顺序不可随意调整。匹配方式是「关键字包含」，存在一批必须靠顺序才能区分的陷阱对：",
+        "  \"TIMESTAMP\" 含 \"TIME\"      → DATETIME 必须早于 TIME",
+        "  \"DATETIME\"  含 \"DATE\"      → DATETIME 必须早于 DATE",
+        "  \"LONGVARCHAR\" 含 \"VARCHAR\" → TEXT 必须早于 STRING",
+        "  \"BIGINT\"    含 \"INT\"       → LONG 必须早于 INTEGER",
+        "把本数组「整理」成字母序或枚举自然序，这些类型就会静默归错族，",
+        "表现为本可映射的列被判为不兼容，或反过来放过了不兼容的映射。",
+        "",
+        "关键字放在契约里而不是各自硬编码：改造前这套顺序敏感的算法在前后端各写一份，",
+        "是最容易在一侧被改动后悄悄失配的地方。"
+      ],
+      "family": "DATETIME",
+      "keywords": [
+        "TIMESTAMP",
+        "DATETIME"
+      ]
+    },
+    {
+      "family": "DATE",
+      "keywords": [
+        "DATE"
+      ]
+    },
+    {
+      "family": "TIME",
+      "keywords": [
+        "TIME"
+      ]
+    },
+    {
+      "family": "JSON",
+      "keywords": [
+        "JSON",
+        "JSONB"
+      ]
+    },
+    {
+      "family": "TEXT",
+      "keywords": [
+        "TEXT",
+        "CLOB",
+        "LONGVARCHAR"
+      ]
+    },
+    {
+      "family": "STRING",
+      "keywords": [
+        "CHAR",
+        "VARCHAR",
+        "NVARCHAR",
+        "NCHAR",
+        "VARCHAR2"
+      ]
+    },
+    {
+      "family": "LONG",
+      "keywords": [
+        "BIGINT"
+      ]
+    },
+    {
+      "family": "INTEGER",
+      "keywords": [
+        "TINYINT",
+        "SMALLINT",
+        "INTEGER",
+        "INT"
+      ]
+    },
+    {
+      "family": "DECIMAL",
+      "keywords": [
+        "DECIMAL",
+        "NUMERIC",
+        "FLOAT",
+        "DOUBLE",
+        "REAL"
+      ]
+    },
+    {
+      "family": "BOOLEAN",
+      "keywords": [
+        "BOOLEAN",
+        "BIT",
+        "BOOL"
+      ]
+    },
+    {
+      "family": "BINARY",
+      "keywords": [
+        "BLOB",
+        "BINARY",
+        "VARBINARY",
+        "BYTEA"
+      ]
+    }
+  ],
+  "widgets": [
+    {
+      "type": "input",
+      "label": "单行输入",
+      "group": "basic",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": true,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "validateRules",
+          "type": "array",
+          "required": false,
+          "desc": "格式校验规则，每项 {type, patternKey} 或 {type, pattern}。type=BUILTIN 时用 patternKey 引用内置规则（如 MOBILE、EMAIL）",
+          "example": "[{\"type\":\"BUILTIN\",\"patternKey\":\"MOBILE\"}]"
+        },
+        {
+          "name": "uniqueCheck",
+          "type": "boolean",
+          "required": false,
+          "desc": "开启后保存时校验该字段在表内唯一"
+        },
+        {
+          "name": "maskRule",
+          "type": "string",
+          "required": false,
+          "desc": "脱敏规则名。只对 maskable=true 的控件有效；填了之后列表与详情按规则打码",
+          "example": "\"NAME\""
+        }
+      ]
+    },
+    {
+      "type": "textarea",
+      "label": "多行输入",
+      "group": "basic",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": true,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "rows",
+          "type": "number",
+          "required": false,
+          "desc": "文本域显示几行高",
+          "example": "3"
+        }
+      ]
+    },
+    {
+      "type": "password",
+      "label": "密码输入",
+      "group": "basic",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT"
+      ],
+      "_comment": "不可查询、不可导出、不可做列表列：密码字段出现在列表或导出文件里本身就是缺陷",
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": true,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "showPassword",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否显示「眼睛」切换明文"
+        }
+      ]
+    },
+    {
+      "type": "inputNumber",
+      "label": "数字输入",
+      "group": "basic",
+      "supported": true,
+      "valueType": "number",
+      "storage": "scalar",
+      "columnTypes": [
+        "INTEGER",
+        "LONG",
+        "DECIMAL"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "precision",
+          "type": "number",
+          "required": false,
+          "desc": "小数位数。⚠️ 要与绑定列的 DECIMAL scale 对上，否则存进去会被截断",
+          "example": "2"
+        },
+        {
+          "name": "min",
+          "type": "number",
+          "required": false,
+          "desc": "允许输入的最小值，低于它无法提交"
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "required": false,
+          "desc": "允许输入的最大值，超过它无法提交"
+        },
+        {
+          "name": "thousands",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否显示千分位"
+        }
+      ]
+    },
+    {
+      "type": "switch",
+      "label": "开关",
+      "group": "basic",
+      "supported": true,
+      "valueType": "boolean",
+      "storage": "scalar",
+      "columnTypes": [
+        "BOOLEAN",
+        "INTEGER",
+        "STRING"
+      ],
+      "_comment": "不可查询沿用行业惯例：布尔查询条件只有两个值，做成查询项体验反而差，用标签页或固定过滤更合适",
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "activeValue",
+          "type": "any",
+          "required": false,
+          "desc": "打开时存的值。⚠️ 默认是布尔 true，绑定到数字列时要显式写成 1",
+          "example": "1"
+        },
+        {
+          "name": "inactiveValue",
+          "type": "any",
+          "required": false,
+          "desc": "关闭时存的值",
+          "example": "0"
+        }
+      ]
+    },
+    {
+      "type": "radio",
+      "label": "单选",
+      "group": "select",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "INTEGER"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "dictSource",
+          "type": "object",
+          "required": false,
+          "desc": "字典数据源。dictType 是字典编码；valueType 决定选项 value 转成什么 JS 类型（不填按字符串），填错会让「存进去的值」和「字典里的值」类型对不上，选项显示为空；rootValue 只取该节点的子树；flatMode 是树形字典喂给扁平控件时的展开方式",
+          "source": "字典管理里的字典类型编码（dict_type）",
+          "example": "{\"dictType\":\"test_demo_priority\",\"valueType\":\"str\"}"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "required": false,
+          "desc": "数据接口数据源。interfaceCode 是数据接口编码，labelField / valueField 指定用返回行的哪个字段做显示文本与实际值；labelField 支持 ${字段} 模板拼接；cache 为 true 时结果会被缓存",
+          "source": "数据接口管理里的接口编码",
+          "example": "{\"interfaceCode\":\"test_demo_product_options\",\"labelField\":\"${label}（${price} 元）\",\"valueField\":\"value\",\"cache\":true}"
+        },
+        {
+          "name": "options",
+          "type": "array",
+          "required": false,
+          "desc": "静态选项，每项 {label, value}。⚠️ 本控件的静态选项写在规则顶层的 options 上，不在 props 里。三种选项来源（静态 / dictSource / dataSource）只能用一种",
+          "example": "[{\"label\":\"高\",\"value\":\"1\"}]"
+        }
+      ]
+    },
+    {
+      "type": "checkbox",
+      "label": "多选",
+      "group": "select",
+      "supported": true,
+      "valueType": "array",
+      "storage": "delimited",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "JSON"
+      ],
+      "_comment": "多值落库：默认逗号分隔串。不可排序 —— 按分隔串排序没有业务语义",
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "dictSource",
+          "type": "object",
+          "required": false,
+          "desc": "字典数据源。dictType 是字典编码；valueType 决定选项 value 转成什么 JS 类型（不填按字符串），填错会让「存进去的值」和「字典里的值」类型对不上，选项显示为空；rootValue 只取该节点的子树；flatMode 是树形字典喂给扁平控件时的展开方式",
+          "source": "字典管理里的字典类型编码（dict_type）",
+          "example": "{\"dictType\":\"test_demo_priority\",\"valueType\":\"str\"}"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "required": false,
+          "desc": "数据接口数据源。interfaceCode 是数据接口编码，labelField / valueField 指定用返回行的哪个字段做显示文本与实际值；labelField 支持 ${字段} 模板拼接；cache 为 true 时结果会被缓存",
+          "source": "数据接口管理里的接口编码",
+          "example": "{\"interfaceCode\":\"test_demo_product_options\",\"labelField\":\"${label}（${price} 元）\",\"valueField\":\"value\",\"cache\":true}"
+        },
+        {
+          "name": "options",
+          "type": "array",
+          "required": false,
+          "desc": "静态选项，每项 {label, value}。⚠️ 本控件的静态选项写在规则顶层的 options 上，不在 props 里。三种选项来源（静态 / dictSource / dataSource）只能用一种",
+          "example": "[{\"label\":\"高\",\"value\":\"1\"}]"
+        }
+      ]
+    },
+    {
+      "type": "select",
+      "label": "下拉选择",
+      "group": "select",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "INTEGER"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "dictSource",
+          "type": "object",
+          "required": false,
+          "desc": "字典数据源。dictType 是字典编码；valueType 决定选项 value 转成什么 JS 类型（不填按字符串），填错会让「存进去的值」和「字典里的值」类型对不上，选项显示为空；rootValue 只取该节点的子树；flatMode 是树形字典喂给扁平控件时的展开方式",
+          "source": "字典管理里的字典类型编码（dict_type）",
+          "example": "{\"dictType\":\"test_demo_priority\",\"valueType\":\"str\"}"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "required": false,
+          "desc": "数据接口数据源。interfaceCode 是数据接口编码，labelField / valueField 指定用返回行的哪个字段做显示文本与实际值；labelField 支持 ${字段} 模板拼接；cache 为 true 时结果会被缓存",
+          "source": "数据接口管理里的接口编码",
+          "example": "{\"interfaceCode\":\"test_demo_product_options\",\"labelField\":\"${label}（${price} 元）\",\"valueField\":\"value\",\"cache\":true}"
+        },
+        {
+          "name": "options",
+          "type": "array",
+          "required": false,
+          "desc": "静态选项，每项 {label, value}。⚠️ 本控件的静态选项写在规则顶层的 options 上，不在 props 里。三种选项来源（静态 / dictSource / dataSource）只能用一种",
+          "example": "[{\"label\":\"高\",\"value\":\"1\"}]"
+        }
+      ]
+    },
+    {
+      "type": "cascader",
+      "label": "级联选择",
+      "group": "select",
+      "supported": true,
+      "valueType": "array",
+      "storage": "delimited",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "JSON"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "dictSource",
+          "type": "object",
+          "required": false,
+          "desc": "字典数据源。dictType 是字典编码；valueType 决定选项 value 转成什么 JS 类型（不填按字符串），填错会让「存进去的值」和「字典里的值」类型对不上，选项显示为空；rootValue 只取该节点的子树；flatMode 是树形字典喂给扁平控件时的展开方式",
+          "source": "字典管理里的字典类型编码（dict_type）",
+          "example": "{\"dictType\":\"test_demo_priority\",\"valueType\":\"str\"}"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "required": false,
+          "desc": "数据接口数据源。interfaceCode 是数据接口编码，labelField / valueField 指定用返回行的哪个字段做显示文本与实际值；labelField 支持 ${字段} 模板拼接；cache 为 true 时结果会被缓存",
+          "source": "数据接口管理里的接口编码",
+          "example": "{\"interfaceCode\":\"test_demo_product_options\",\"labelField\":\"${label}（${price} 元）\",\"valueField\":\"value\",\"cache\":true}"
+        },
+        {
+          "name": "options",
+          "type": "array",
+          "required": false,
+          "desc": "静态选项（树形），每项 {label, value, children}。本控件的静态选项就在 props.options 上",
+          "example": "[{\"label\":\"华东\",\"value\":\"1\",\"children\":[]}]"
+        }
+      ]
+    },
+    {
+      "type": "tree",
+      "label": "树形控件",
+      "group": "select",
+      "supported": true,
+      "valueType": "array",
+      "storage": "delimited",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "JSON"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "dictSource",
+          "type": "object",
+          "required": false,
+          "desc": "字典数据源。dictType 是字典编码；valueType 决定选项 value 转成什么 JS 类型（不填按字符串），填错会让「存进去的值」和「字典里的值」类型对不上，选项显示为空；rootValue 只取该节点的子树；flatMode 是树形字典喂给扁平控件时的展开方式",
+          "source": "字典管理里的字典类型编码（dict_type）",
+          "example": "{\"dictType\":\"test_demo_priority\",\"valueType\":\"str\"}"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "required": false,
+          "desc": "数据接口数据源。interfaceCode 是数据接口编码，labelField / valueField 指定用返回行的哪个字段做显示文本与实际值；labelField 支持 ${字段} 模板拼接；cache 为 true 时结果会被缓存",
+          "source": "数据接口管理里的接口编码",
+          "example": "{\"interfaceCode\":\"test_demo_product_options\",\"labelField\":\"${label}（${price} 元）\",\"valueField\":\"value\",\"cache\":true}"
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "required": false,
+          "desc": "静态选项（树形），每项 {label, value, children}。本控件的静态选项在 props.data 上",
+          "example": "[{\"label\":\"华东\",\"value\":\"1\",\"children\":[]}]"
+        },
+        {
+          "name": "nodeKey",
+          "type": "string",
+          "required": false,
+          "desc": "树节点的唯一标识字段名",
+          "example": "\"id\""
+        },
+        {
+          "name": "showCheckbox",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否显示复选框（多选）"
+        }
+      ]
+    },
+    {
+      "type": "elTreeSelect",
+      "label": "树形选择",
+      "group": "select",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "INTEGER"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "dictSource",
+          "type": "object",
+          "required": false,
+          "desc": "字典数据源。dictType 是字典编码；valueType 决定选项 value 转成什么 JS 类型（不填按字符串），填错会让「存进去的值」和「字典里的值」类型对不上，选项显示为空；rootValue 只取该节点的子树；flatMode 是树形字典喂给扁平控件时的展开方式",
+          "source": "字典管理里的字典类型编码（dict_type）",
+          "example": "{\"dictType\":\"test_demo_priority\",\"valueType\":\"str\"}"
+        },
+        {
+          "name": "dataSource",
+          "type": "object",
+          "required": false,
+          "desc": "数据接口数据源。interfaceCode 是数据接口编码，labelField / valueField 指定用返回行的哪个字段做显示文本与实际值；labelField 支持 ${字段} 模板拼接；cache 为 true 时结果会被缓存",
+          "source": "数据接口管理里的接口编码",
+          "example": "{\"interfaceCode\":\"test_demo_product_options\",\"labelField\":\"${label}（${price} 元）\",\"valueField\":\"value\",\"cache\":true}"
+        },
+        {
+          "name": "data",
+          "type": "array",
+          "required": false,
+          "desc": "静态选项（树形），每项 {label, value, children}。本控件的静态选项在 props.data 上",
+          "example": "[{\"label\":\"华东\",\"value\":\"1\",\"children\":[]}]"
+        },
+        {
+          "name": "nodeKey",
+          "type": "string",
+          "required": false,
+          "desc": "树节点的唯一标识字段名",
+          "example": "\"value\""
+        }
+      ]
+    },
+    {
+      "type": "elTransfer",
+      "label": "穿梭框",
+      "group": "select",
+      "supported": true,
+      "valueType": "array",
+      "storage": "delimited",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "JSON"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "datePicker",
+      "label": "日期",
+      "group": "basic",
+      "supported": true,
+      "valueType": "date",
+      "storage": "scalar",
+      "columnTypes": [
+        "DATE",
+        "DATETIME",
+        "STRING",
+        "LONG"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "valueFormat",
+          "type": "string",
+          "required": false,
+          "desc": "存进数据库的格式。⚠️ 与绑定列类型不匹配是最常见的静默失效：DATE 列配了带时分秒的格式会被截断，DATETIME 列配了纯日期会丢时间",
+          "example": "\"YYYY-MM-DD HH:mm:ss\""
+        }
+      ]
+    },
+    {
+      "type": "dateRange",
+      "label": "日期区间",
+      "group": "basic",
+      "supported": true,
+      "valueType": "array",
+      "storage": "delimited",
+      "columnTypes": [
+        "STRING",
+        "TEXT"
+      ],
+      "_comment": "区间控件落一列分隔串。它本身不可做查询条件 —— 查询侧应该用单个日期字段配 BETWEEN 操作符",
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "timePicker",
+      "label": "时间",
+      "group": "basic",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "TIME",
+        "STRING",
+        "DATETIME"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "timeRange",
+      "label": "时间区间",
+      "group": "basic",
+      "supported": true,
+      "valueType": "array",
+      "storage": "delimited",
+      "columnTypes": [
+        "STRING",
+        "TEXT"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "slider",
+      "label": "滑块",
+      "group": "basic",
+      "supported": true,
+      "valueType": "number",
+      "storage": "scalar",
+      "columnTypes": [
+        "INTEGER",
+        "LONG",
+        "DECIMAL"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "min",
+          "type": "number",
+          "required": false,
+          "desc": "滑块左端对应的值"
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "required": false,
+          "desc": "滑块右端对应的值"
+        }
+      ]
+    },
+    {
+      "type": "rate",
+      "label": "评分",
+      "group": "basic",
+      "supported": true,
+      "valueType": "number",
+      "storage": "scalar",
+      "columnTypes": [
+        "INTEGER",
+        "DECIMAL"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "max",
+          "type": "number",
+          "required": false,
+          "desc": "总星数，决定满分是几分"
+        }
+      ]
+    },
+    {
+      "type": "colorPicker",
+      "label": "颜色选择",
+      "group": "basic",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING"
+      ],
+      "_comment": "不可进子表、不可查询：颜色值做查询条件无业务意义",
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "signaturePad",
+      "label": "手写签名（内核内置）",
+      "group": "advanced",
+      "supported": false,
+      "deprecated": true,
+      "valueType": "file",
+      "storage": "scalar",
+      "columnTypes": [],
+      "_comment": [
+        "内核内置的手写签名，值是 canvas 直出的 base64。单张 20–100KB：映射到 varchar(255) 直接写失败，",
+        "映射到 TEXT 则 SELECT * 把整串带进列表查询、导出体积异常。B8 批次改用自建 Signature 控件替代，",
+        "它把画布产物转存文件服务、只存 URL。",
+        "",
+        "同 upload / fcEditor：菜单已按 supported=false 自动隐藏（createDesignerConfig 的 hiddenItem），",
+        "契约条目保留作为发布校验的第二道防线 —— 历史表单里若还留着，发布时明确报错而不是运行时静默入库 base64。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "upload",
+      "label": "上传（内核内置）",
+      "group": "advanced",
+      "supported": false,
+      "_comment": "内核内置上传已从菜单移除（removeMenuItem('upload')），由 UploadFile/UploadImg/UploadImgs 替代。列为 unsupported 作为第二道防线：历史表单若含此类型，发布时明确报错而不是静默走错分支",
+      "valueType": "array",
+      "storage": "json",
+      "columnTypes": [],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "fcEditor",
+      "label": "富文本（内核内置）",
+      "group": "advanced",
+      "supported": false,
+      "_comment": "内核内置富文本已从菜单移除（removeMenuItem('fcEditor')），由自建 Editor 替代。同上，保留为 unsupported 作第二道防线",
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "group",
+      "label": "子表",
+      "group": "advanced",
+      "supported": true,
+      "valueType": "array",
+      "storage": "subTable",
+      "columnTypes": [],
+      "_comment": [
+        "唯一被支持的子表控件。值是对象数组，走独立明细表，不映射主表列。",
+        "它的内部规则挂在 props.rule 下（不是 children），这是与布局容器的关键差别。",
+        "structural.subTableWidgetType 即指向本条 —— 原先这个字符串在两个仓库重复 6 处。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "rule",
+          "type": "array",
+          "required": false,
+          "desc": "子表内部的字段列表，结构与顶层字段相同。🔴 子表字段写在这里，不是写在顶层"
+        },
+        {
+          "name": "min",
+          "type": "number",
+          "required": false,
+          "desc": "最少几行，少于它无法提交"
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "required": false,
+          "desc": "最多几行，多于它无法继续添加"
+        },
+        {
+          "name": "summaryFields",
+          "type": "array",
+          "required": false,
+          "desc": "需要合计的子表字段名",
+          "example": "[\"amount\"]"
+        },
+        {
+          "name": "collapsible",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否可折叠"
+        },
+        {
+          "name": "defaultCollapsed",
+          "type": "boolean",
+          "required": false,
+          "desc": "默认是否折叠"
+        }
+      ]
+    },
+    {
+      "type": "tableForm",
+      "label": "表格表单（不支持）",
+      "group": "advanced",
+      "supported": false,
+      "valueType": "array",
+      "storage": "subTable",
+      "columnTypes": [],
+      "_comment": [
+        "内核里它和 group 一样是 array 值的子表控件（subForm: 'array'），但本模块的子表绑定只认 group。",
+        "改造前它在菜单里可拖但后端不识别 —— 用户拖进来会静默不当子表处理，明细数据写不进去。",
+        "现在两处兜住：设计器菜单隐藏（createDesignerConfig）+ 发布校验拒绝（本 supported=false）。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "subForm",
+      "label": "分组（不支持）",
+      "group": "advanced",
+      "supported": false,
+      "valueType": "object",
+      "storage": "json",
+      "columnTypes": [],
+      "_comment": "内核的『分组』是 object 值的嵌套表单（subForm: 'object'）。本模块的字段映射按扁平 field 组织，不支持嵌套对象。同样两处兜住",
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "UploadFile",
+      "label": "文件上传",
+      "group": "advanced",
+      "supported": true,
+      "valueType": "file",
+      "storage": "json",
+      "columnTypes": [
+        "TEXT",
+        "JSON",
+        "STRING"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "fileType",
+          "type": "array",
+          "required": false,
+          "desc": "允许的文件扩展名",
+          "example": "[\"doc\",\"xls\",\"ppt\",\"txt\",\"pdf\"]"
+        },
+        {
+          "name": "fileSize",
+          "type": "number",
+          "required": false,
+          "desc": "单个文件大小上限（MB）"
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "required": false,
+          "desc": "最多能上传几个文件"
+        },
+        {
+          "name": "drag",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否支持拖拽上传"
+        },
+        {
+          "name": "autoUpload",
+          "type": "boolean",
+          "required": false,
+          "desc": "选中后是否立即上传"
+        }
+      ]
+    },
+    {
+      "type": "UploadImg",
+      "label": "单图上传",
+      "group": "advanced",
+      "supported": true,
+      "valueType": "file",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "UploadImgs",
+      "label": "多图上传",
+      "group": "advanced",
+      "supported": true,
+      "valueType": "file",
+      "storage": "json",
+      "columnTypes": [
+        "TEXT",
+        "JSON"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "fileType",
+          "type": "array",
+          "required": false,
+          "desc": "允许的图片扩展名清单"
+        },
+        {
+          "name": "fileSize",
+          "type": "number",
+          "required": false,
+          "desc": "单张大小上限（MB）"
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "required": false,
+          "desc": "最多能上传几张图"
+        },
+        {
+          "name": "width",
+          "type": "string",
+          "required": false,
+          "desc": "缩略图预览宽度，带单位"
+        },
+        {
+          "name": "height",
+          "type": "string",
+          "required": false,
+          "desc": "缩略图预览高度，带单位"
+        }
+      ]
+    },
+    {
+      "type": "Editor",
+      "label": "富文本",
+      "group": "advanced",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "TEXT"
+      ],
+      "_comment": "只允许映射到 TEXT 族：富文本内容映射到 varchar 几乎必然截断",
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "Signature",
+      "label": "手写签名",
+      "group": "advanced",
+      "supported": true,
+      "valueType": "file",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT"
+      ],
+      "_comment": [
+        "自建手写签名，替代内核的 signaturePad。画布产物走 infra-file 上传，落库【只存 URL】。",
+        "",
+        "columnTypes 允许 STRING，但发布校验会额外检查列长度（validateFileColumnLength）——",
+        "映射到 varchar(50) 存不下一个文件 URL，而那个报错发生在提交时、形态是数据库截断或 500。",
+        "",
+        "不可查询、不可做列表列、不可导出：一张签名图做查询条件没有业务意义，",
+        "列表里展示一列图片会把每行都拖成一次图片请求。",
+        "",
+        "刻意不另存 {signerId, signedTime}：签署人与时间的权威来源是记录自己的",
+        "creator / create_time（已由自动填充列承载），前端提交的那一份不可信。",
+        "需要在图片上看到是谁签的，用属性面板的「签署水印」——它把这两个值烧进图片。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "width",
+          "type": "number",
+          "required": false,
+          "desc": "签名画布宽度（像素）"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "required": false,
+          "desc": "签名画布高度（像素）"
+        },
+        {
+          "name": "penWidth",
+          "type": "number",
+          "required": false,
+          "desc": "笔画粗细（像素）"
+        },
+        {
+          "name": "penColor",
+          "type": "string",
+          "required": false,
+          "desc": "笔画颜色，CSS 颜色值"
+        },
+        {
+          "name": "bgColor",
+          "type": "string",
+          "required": false,
+          "desc": "画布背景色，CSS 颜色值"
+        }
+      ]
+    },
+    {
+      "type": "OrgPicker",
+      "label": "组织选择器",
+      "group": "system",
+      "supported": true,
+      "valueType": "array",
+      "storage": "json",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "JSON",
+        "LONG"
+      ],
+      "_comment": [
+        "合并了用户 / 部门 / 岗位 / 角色 / 用户组五类选择，靠属性面板勾选「可选主体类型」区分。",
+        "对标产品拆成 6 个独立控件，菜单臃肿且互相不兼容 —— 从「选用户」改成",
+        "「选用户或部门」意味着换控件、重配一遍。",
+        "",
+        "值契约：单选 {type,id}，多选 [{type,id}]。落库形态由属性决定 ——",
+        "单选且只允许一种主体类型时可退化成单值列（兼容既有表结构），否则存 JSON。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "types",
+          "type": "array",
+          "required": false,
+          "desc": "可选的组织类型",
+          "allowedValues": [
+            "user",
+            "dept",
+            "post",
+            "role"
+          ],
+          "example": "[\"user\",\"dept\"]"
+        },
+        {
+          "name": "multiple",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否多选"
+        },
+        {
+          "name": "maxCount",
+          "type": "number",
+          "required": false,
+          "desc": "多选时的数量上限"
+        }
+      ]
+    },
+    {
+      "type": "SystemValue",
+      "label": "系统值",
+      "group": "system",
+      "supported": true,
+      "valueType": "string",
+      "storage": "none",
+      "columnTypes": [],
+      "_comment": [
+        "展示创建人 / 创建时间 / 更新人 / 更新时间 / 当前登录人 / 当前部门 / 当前岗位 / 当前时间。",
+        "",
+        "storage 是 none：它自己不落库。值由 AutoFillConfig 按登录上下文写入，",
+        "本控件只做只读渲染，提交值会被 SystemValueGuard 剥离。",
+        "这与「拖 6 个可提交控件」的做法本质不同 —— 后者每个都是普通字段，",
+        "前端提交什么就存什么，创建人可被随意伪造。",
+        "",
+        "不可作为查询条件与排序依据：查询要针对物理列本身，而不是这个展示控件。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "source",
+          "type": "string",
+          "required": true,
+          "desc": "取值来源。🔴 键名是 source，不是 valueType —— 写成别的键不会报错，控件会安静地回落成默认的「创建人」。前四种由后端自动填充列写入，后四种只做展示、不落库",
+          "allowedValues": [
+            "CREATOR",
+            "CREATE_TIME",
+            "UPDATER",
+            "UPDATE_TIME",
+            "CURRENT_USER",
+            "CURRENT_DEPT",
+            "CURRENT_POST",
+            "NOW"
+          ],
+          "example": "\"CREATOR\""
+        },
+        {
+          "name": "dateFormat",
+          "type": "string",
+          "required": false,
+          "desc": "仅时间类来源有效",
+          "example": "\"YYYY-MM-DD HH:mm:ss\""
+        }
+      ]
+    },
+    {
+      "type": "RelationForm",
+      "label": "关联表单",
+      "group": "select",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "LONG",
+        "INTEGER",
+        "TEXT"
+      ],
+      "_comment": [
+        "值是被关联记录的主键。带出字段不由本控件落库 —— 它们各自是独立的普通字段，",
+        "由服务端按映射表重新读取后写入（见 RelationFormFiller）。",
+        "",
+        "带出关系收在本控件的属性面板里，而不是让用户为每个带出字段再拖一个",
+        "「关联属性」控件：那样一个带出 5 个字段的关联要拖 6 个控件、做 6 次绑定，",
+        "而且删掉宿主之后属性控件会变成指向不存在控件的孤儿。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "targetFormCode",
+          "type": "string",
+          "required": true,
+          "desc": "被关联表单的 code",
+          "source": "表单设计列表里的表单编码，可用 form_list 查",
+          "example": "\"test_demo_customer\""
+        },
+        {
+          "name": "displayField",
+          "type": "string",
+          "required": true,
+          "desc": "选中后显示哪个字段",
+          "example": "\"customer_name\""
+        },
+        {
+          "name": "fieldMappings",
+          "type": "array",
+          "required": false,
+          "desc": "带出字段的映射，每项 {sourceField, targetField, updateMode}。sourceField 是目标表单的字段，targetField 是本表单的字段；updateMode=ALWAYS 每次都覆盖，ONCE 只在首次带出。🔴 关联关系存在本控件上：一个关联要带出 5 个字段就配 5 条映射，不要放 5 个关联控件各绑一次",
+          "example": "[{\"sourceField\":\"level\",\"targetField\":\"customer_level\",\"updateMode\":\"ALWAYS\"}]"
+        }
+      ]
+    },
+    {
+      "type": "RemotePicker",
+      "label": "远程选择器",
+      "group": "select",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "INTEGER",
+        "LONG"
+      ],
+      "_comment": [
+        "以数据接口 / 数据字典 / 静态数据为源的通用选择器。",
+        "三种展示形态（下拉 / 搜索输入 / 弹窗表格）共用一套数据源配置与值契约 ——",
+        "用户改形态不用重配数据源。对标实现是三到四个独立控件、各自一套配置。",
+        "",
+        "它替代了 ApiSelect（下拉形态即等价物），后者已在本批次删除。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "interfaceCode",
+          "type": "string",
+          "required": true,
+          "desc": "数据接口编码",
+          "source": "数据接口管理里的接口编码",
+          "example": "\"test_demo_product_options\""
+        },
+        {
+          "name": "labelField",
+          "type": "string",
+          "required": true,
+          "desc": "用返回行的哪个字段做显示文本",
+          "example": "\"label\""
+        },
+        {
+          "name": "valueField",
+          "type": "string",
+          "required": true,
+          "desc": "用返回行的哪个字段做实际值",
+          "example": "\"value\""
+        }
+      ]
+    },
+    {
+      "type": "Formula",
+      "label": "计算公式",
+      "group": "advanced",
+      "supported": true,
+      "valueType": "number",
+      "storage": "scalar",
+      "columnTypes": [
+        "INTEGER",
+        "LONG",
+        "DECIMAL",
+        "STRING",
+        "TEXT"
+      ],
+      "_comment": [
+        "只读字段：值由公式算出，用户不能直接编辑。",
+        "服务端在提交时用同一份 AST 权威重算并覆盖前端提交值 —— 只有前端算的话，",
+        "构造一个请求就能写入任意金额。",
+        "允许映射到 STRING/TEXT 是因为 CONCAT 这类文本公式，发布校验会按公式的",
+        "结果类型再核一次。"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "expression",
+          "type": "string",
+          "required": true,
+          "desc": "公式表达式，字段用 {字段名} 引用",
+          "example": "\"{rate_score} * {amount}\""
+        },
+        {
+          "name": "ast",
+          "type": "object",
+          "required": false,
+          "desc": "表达式的语法树。🔴 由设计器解析 expression 生成，两者不一致时以 ast 为准 —— 只改 expression 不改 ast 等于没改"
+        },
+        {
+          "name": "precision",
+          "type": "number",
+          "required": false,
+          "desc": "结果小数位数",
+          "example": "2"
+        },
+        {
+          "name": "rounding",
+          "type": "string",
+          "required": false,
+          "desc": "舍入方式",
+          "allowedValues": [
+            "HALF_UP",
+            "CEIL",
+            "FLOOR"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "IframeComponent",
+      "label": "Iframe",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "desc": "内嵌页面地址，支持 {字段名} 引用"
+        },
+        {
+          "name": "height",
+          "type": "string",
+          "required": false,
+          "desc": "内嵌区域高度，带单位"
+        },
+        {
+          "name": "width",
+          "type": "string",
+          "required": false,
+          "desc": "内嵌区域宽度，带单位"
+        }
+      ]
+    },
+    {
+      "type": "AreaSelect",
+      "label": "行政区划",
+      "group": "select",
+      "supported": true,
+      "valueType": "array",
+      "storage": "delimited",
+      "columnTypes": [
+        "STRING",
+        "TEXT"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": false,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "level",
+          "type": "number",
+          "required": false,
+          "desc": "可选到第几级（省/市/区）"
+        },
+        {
+          "name": "showAllLevels",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否显示完整路径"
+        },
+        {
+          "name": "separator",
+          "type": "string",
+          "required": false,
+          "desc": "完整路径的分隔符"
+        }
+      ]
+    },
+    {
+      "type": "DictSelect",
+      "label": "字典选择器",
+      "group": "select",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "INTEGER"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "dictType",
+          "type": "string",
+          "required": true,
+          "desc": "字典编码",
+          "source": "字典管理里的字典类型编码（dict_type）",
+          "example": "\"test_demo_customer_level\""
+        },
+        {
+          "name": "valueType",
+          "type": "string",
+          "required": false,
+          "desc": "字典值类型，决定选项 value 的 JS 类型",
+          "allowedValues": [
+            "str",
+            "int",
+            "bool"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "BillNumberInput",
+      "label": "单据编号",
+      "group": "system",
+      "supported": true,
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": false,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": true
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "ruleMode",
+          "type": "number",
+          "required": true,
+          "desc": "规则来源：1=引用单据模板，2=自定义规则",
+          "allowedValues": [
+            "1",
+            "2"
+          ],
+          "example": "1"
+        },
+        {
+          "name": "templateCode",
+          "type": "string",
+          "required": false,
+          "desc": "ruleMode=1 时必填，单据模板编码",
+          "source": "单据模板管理里的模板编码",
+          "example": "\"test_demo_gallery_no\""
+        },
+        {
+          "name": "ruleConfig",
+          "type": "object",
+          "required": false,
+          "desc": "ruleMode=2 时的自定义规则配置"
+        }
+      ]
+    },
+    {
+      "type": "UserSelect",
+      "label": "用户选择器（已删除）",
+      "group": "system",
+      "supported": false,
+      "deprecated": true,
+      "_comment": [
+        "已在 B4 批次删除，由 OrgPicker（限定可选主体类型）替代。",
+        "契约条目保留并标为不支持，作为发布校验的第二道防线：",
+        "历史表单若还留着它，发布时会明确报错并提示替代品。"
+      ],
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "LONG",
+        "TEXT"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "DeptSelect",
+      "label": "部门选择器（已删除）",
+      "group": "system",
+      "supported": false,
+      "deprecated": true,
+      "_comment": [
+        "已在 B4 批次删除，由 OrgPicker（限定可选主体类型）替代。",
+        "契约条目保留并标为不支持，作为发布校验的第二道防线：",
+        "历史表单若还留着它，发布时会明确报错并提示替代品。"
+      ],
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "LONG",
+        "TEXT"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "ApiSelect",
+      "label": "接口选择器（已删除）",
+      "group": "select",
+      "supported": false,
+      "deprecated": true,
+      "_comment": [
+        "已在 B3 批次删除，由 RemotePicker（下拉形态）替代。",
+        "契约条目保留并标为不支持，作为发布校验的第二道防线：",
+        "万一有历史表单里还留着这个控件，发布时会明确报错并提示替代品，",
+        "而不是让它在运行时静默失效。"
+      ],
+      "valueType": "string",
+      "storage": "scalar",
+      "columnTypes": [
+        "STRING",
+        "TEXT",
+        "INTEGER",
+        "LONG"
+      ],
+      "caps": {
+        "field": true,
+        "subTable": true,
+        "listColumn": true,
+        "searchable": true,
+        "exportable": true,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "elAlert",
+      "label": "提示",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "desc": "提示内容"
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": false,
+          "desc": "提示类型",
+          "allowedValues": [
+            "success",
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        {
+          "name": "closable",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否可关闭"
+        }
+      ]
+    },
+    {
+      "type": "elButton",
+      "label": "按钮",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "elDivider",
+      "label": "分割线",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "contentPosition",
+          "type": "string",
+          "required": false,
+          "desc": "文字位置",
+          "allowedValues": [
+            "left",
+            "center",
+            "right"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "html",
+      "label": "HTML",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "elImage",
+      "label": "图片",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "src",
+          "type": "string",
+          "required": true,
+          "desc": "图片地址"
+        },
+        {
+          "name": "fit",
+          "type": "string",
+          "required": false,
+          "desc": "填充方式",
+          "allowedValues": [
+            "fill",
+            "contain",
+            "cover",
+            "none",
+            "scale-down"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "CodeImage",
+      "label": "条码/二维码",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "_comment": "纯展示，不落库。值支持 {字段} 插值（订单号 → 条码）。条形码与二维码是同一个控件的两种形态，靠 props.codeType 切换 —— 分成两个控件的话，用户想换一种就得删了重拖",
+      "props": [
+        {
+          "name": "codeType",
+          "type": "string",
+          "required": true,
+          "desc": "生成条形码还是二维码",
+          "allowedValues": [
+            "barcode",
+            "qrcode"
+          ],
+          "example": "\"barcode\""
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "required": false,
+          "desc": "码的内容，支持 {字段名} 引用本表单字段",
+          "example": "\"{barcode_value}\""
+        },
+        {
+          "name": "size",
+          "type": "number",
+          "required": false,
+          "desc": "码的显示尺寸（像素）"
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "required": false,
+          "desc": "条码编码格式，仅 barcode 有效",
+          "example": "\"CODE128\""
+        },
+        {
+          "name": "displayValue",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否在码下方显示文本"
+        }
+      ]
+    },
+    {
+      "type": "Link",
+      "label": "超链接",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "_comment": "纯展示，不落库。地址支持 {字段} 插值，协议走白名单（只允许 http/https/mailto/tel）—— javascript: 与 data: 能在用户点击时执行任意脚本，前后端各校验一次",
+      "props": [
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "desc": "链接地址，支持 {字段名} 引用本表单字段"
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "required": false,
+          "desc": "链接上显示的文字"
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "required": false,
+          "desc": "打开方式",
+          "allowedValues": [
+            "_self",
+            "_blank"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "elTag",
+      "label": "标签",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "text",
+      "label": "文字",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": true,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "fcTitle",
+      "label": "标题",
+      "group": "display",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "desc": "标题文字"
+        },
+        {
+          "name": "collapsible",
+          "type": "boolean",
+          "required": false,
+          "desc": "是否可折叠它下方的内容"
+        }
+      ]
+    },
+    {
+      "type": "fcRow",
+      "label": "栅格布局",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "gutter",
+          "type": "number",
+          "required": false,
+          "desc": "栅格列之间的间距（像素）"
+        }
+      ]
+    },
+    {
+      "type": "col",
+      "label": "栅格列",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "span",
+          "type": "number",
+          "required": false,
+          "desc": "占据几格（共 24 格）",
+          "example": "12"
+        }
+      ]
+    },
+    {
+      "type": "elCard",
+      "label": "卡片",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "header",
+          "type": "string",
+          "required": false,
+          "desc": "卡片顶部的标题文字"
+        }
+      ]
+    },
+    {
+      "type": "elCollapse",
+      "label": "折叠面板",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "elCollapseItem",
+      "label": "折叠项",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "desc": "折叠面板标题"
+        }
+      ]
+    },
+    {
+      "type": "elTabs",
+      "label": "标签页",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "elTabPane",
+      "label": "选项卡",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "label",
+          "type": "string",
+          "required": true,
+          "desc": "标签页标题"
+        }
+      ]
+    },
+    {
+      "type": "FormSteps",
+      "label": "步骤条",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "_comment": [
+        "自建的步骤条容器（设计方案 §5.8）。子节点是 FormStep，靠菜单项上的 children 声明。",
+        "「每步校验通过才能下一步」此前是挂在标签页容器上交付的（props.stepValidate，见 stepValidate.ts），",
+        "两者并存：已有表单继续用标签页那套，新表单要横条样式就用本容器。两边校验语义一致 ——",
+        "只拦往后走，不拦往回退。"
+      ],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "FormStep",
+      "label": "步骤",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "_comment": "步骤条容器里的一步。菜单项上 inside: true —— 只能拖进容器内部，不出现在左侧面板",
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null,
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "desc": "步骤标题"
+        },
+        {
+          "name": "stepValidate",
+          "type": "boolean",
+          "required": false,
+          "desc": "切到下一步时是否校验本步字段"
+        }
+      ]
+    },
+    {
+      "type": "fcTable",
+      "label": "表格布局",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    },
+    {
+      "type": "space",
+      "label": "间距",
+      "group": "layout",
+      "supported": true,
+      "valueType": "none",
+      "storage": "none",
+      "columnTypes": [],
+      "caps": {
+        "field": false,
+        "subTable": false,
+        "listColumn": false,
+        "searchable": false,
+        "exportable": false,
+        "sortable": false
+      },
+      "maskable": false,
+      "permissionKey": null
+    }
+  ]
+}

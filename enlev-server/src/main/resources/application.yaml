@@ -1,0 +1,488 @@
+spring:
+  application:
+    name: enlev-server
+
+  profiles:
+    active: local
+
+  main:
+    allow-circular-references: true # 允许循环依赖，因为项目是三层架构，无法避免这个情况。
+
+  # Servlet 配置
+  servlet:
+    # 文件上传相关配置项
+    multipart:
+      max-file-size: 16MB # 单个文件大小
+      max-request-size: 32MB # 设置总上传的文件大小
+
+  # Jackson 配置项
+  jackson:
+    serialization:
+      write-dates-as-timestamps: true # 设置 Date 的格式，使用时间戳
+      write-date-timestamps-as-nanoseconds: false # 设置不使用 nanoseconds 的格式。例如说 1611460870.401，而是直接 1611460870401
+      write-durations-as-timestamps: true # 设置 Duration 的格式，使用时间戳
+      fail-on-empty-beans: false # 允许序列化无属性的 Bean
+
+  # Cache 配置项
+  cache:
+    type: REDIS
+    redis:
+      time-to-live: 1h # 设置过期时间为 1 小时
+
+server:
+  servlet:
+    encoding:
+      enabled: true
+      charset: UTF-8 # 必须设置 UTF-8，避免 WebFlux 流式返回（AI 场景）会乱码问题
+      force: true
+
+--- #################### 接口文档配置 ####################
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui
+  default-flat-param-object: true # 参见 https://doc.xiaominfo.com/docs/faq/v4/knife4j-parameterobject-flat-param 文档
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
+# 工作流 Flowable 配置
+flowable:
+  # 1. false: 默认值，Flowable 启动时，对比数据库表中保存的版本，如果不匹配。将抛出异常
+  # 2. true: 启动时会对数据库中所有表进行更新操作，如果表存在，不做处理，反之，自动创建表
+  # 3. create_drop: 启动时自动创建表，关闭时自动删除表
+  # 4. drop_create: 启动时，删除旧表，再创建新表
+  database-schema-update: true # 设置为 false，可通过 https://github.com/flowable/flowable-sql 初始化
+  db-history-used: true # flowable6 默认 true 生成信息表，无需手动设置
+  check-process-definitions: false # 设置为 false，禁用 /resources/processes 自动部署 BPMN XML 流程
+  history-level: audit # full：保存历史数据的最高级别，可保存全部流程相关细节，包括流程流转各节点参数
+
+# MyBatis Plus 的配置项
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true # 虽然默认为 true ，但是还是显示去指定下。
+  global-config:
+    db-config:
+      id-type: NONE # “智能”模式，基于 IdTypeEnvironmentPostProcessor + 数据源的类型，自动适配成 AUTO、INPUT 模式。
+#      id-type: AUTO # 自增 ID，适合 MySQL 等直接自增的数据库
+#      id-type: INPUT # 用户输入 ID，适合 Oracle、PostgreSQL、Kingbase、DB2、H2 数据库
+#      id-type: ASSIGN_ID # 分配 ID，默认使用雪花算法。注意，Oracle、PostgreSQL、Kingbase、DB2、H2 数据库时，需要去除实体类上的 @KeySequence 注解
+      logic-delete-value: 1 # 逻辑已删除值(默认为 1)
+      logic-not-delete-value: 0 # 逻辑未删除值(默认为 0)
+    banner: false # 关闭控制台的 Banner 打印
+  type-aliases-package: ${enlev.info.base-package}.module.*.dal.dataobject
+  encryptor:
+    password: XDV71a+xqStEA3WH # 加解密的秘钥，可使用 https://www.imaegoo.com/2020/aes-key-generator/ 网站生成
+
+mybatis-plus-join:
+  banner: false # 是否打印 mybatis plus join banner，默认true
+  sub-table-logic: true # 全局启用副表逻辑删除，默认true。关闭后关联查询不会加副表逻辑删除
+  ms-cache: true # 拦截器MappedStatement缓存，默认 true
+  table-alias: t # 表别名(默认 t)
+  logic-del-type: on # 副表逻辑删除条件的位置，支持 WHERE、ON，默认 ON
+
+# Spring Data Redis 配置
+spring:
+  data:
+    redis:
+      repositories:
+        enabled: false # 项目未使用到 Spring Data Redis 的 Repository，所以直接禁用，保证启动速度
+
+# VO 转换（数据翻译）相关
+easy-trans:
+  is-enable-global: false # 【默认禁用，对性能确认压力大】启用全局翻译（拦截所有 SpringMVC ResponseBody 进行自动翻译 )。如果对于性能要求很高可关闭此配置，或通过 @IgnoreTrans 忽略某个接口
+
+--- #################### 验证码相关配置 ####################
+
+aj:
+  captcha:
+    jigsaw: classpath:images/jigsaw # 滑动验证，底图路径，不配置将使用默认图片；以 classpath: 开头，取 resource 目录下路径
+    pic-click: classpath:images/pic-click # 滑动验证，底图路径，不配置将使用默认图片；以 classpath: 开头，取 resource 目录下路径
+    cache-type: redis # 缓存 local/redis...
+    cache-number: 1000 # local 缓存的阈值,达到这个值，清除缓存
+    timing-clear: 180 # local定时清除过期缓存(单位秒),设置为0代表不执行
+    type: blockPuzzle # 验证码类型 default 三种都实例化。blockPuzzle 滑块拼图、clickWord 文字点选、pictureWord 文本输入
+    water-mark: 启凌智搭 # 右下角水印文字(我的水印)，可使用 https://tool.chinaz.com/tools/unicode.aspx 中文转 Unicode，Linux 可能需要转 unicode
+    interference-options: 0 # 滑动干扰项(0/1/2)
+    req-frequency-limit-enable: false # 接口请求次数一分钟限制是否开启 true|false
+    req-get-lock-limit: 5 # 验证失败 5 次，get接口锁定
+    req-get-lock-seconds: 10 # 验证失败后，锁定时间间隔
+    req-get-minute-limit: 30 # get 接口一分钟内请求数限制
+    req-check-minute-limit: 60 # check 接口一分钟内请求数限制
+    req-verify-minute-limit: 60 # verify 接口一分钟内请求数限制
+
+--- #################### 消息队列相关 ####################
+
+# rocketmq 配置项，对应 RocketMQProperties 配置类
+rocketmq:
+  # Producer 配置项
+  producer:
+    group: ${spring.application.name}_PRODUCER # 生产者分组
+
+spring:
+  # Kafka 配置项，对应 KafkaProperties 配置类
+  kafka:
+    # Kafka Producer 配置项
+    producer:
+      acks: 1 # 0-不应答。1-leader 应答。all-所有 leader 和 follower 应答。
+      retries: 3 # 发送失败时，重试发送的次数
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer # 消息的 value 的序列化
+    # Kafka Consumer 配置项
+    consumer:
+      auto-offset-reset: earliest # 设置消费者分组最初的消费进度为 earliest 。可参考博客 https://blog.csdn.net/lishuangzhe7047/article/details/74530417 理解
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: '*'
+    # Kafka Consumer Listener 监听器配置
+    listener:
+      missing-topics-fatal: false # 消费监听接口监听的主题不存在时，默认会报错。所以通过设置为 false ，解决报错
+
+--- #################### AI 相关配置 ####################
+
+spring:
+  ai:
+    vectorstore: # 向量存储
+      redis:
+        initialize-schema: true
+        index-name: knowledge_index # Redis 中向量索引的名称：用于存储和检索向量数据的索引标识符，所有相关的向量搜索操作都会基于这个索引进行
+        prefix: "knowledge_segment:" # Redis 中存储向量数据的键名前缀：这个前缀会添加到每个存储在 Redis 中的向量数据键名前，每个 document 都是一个 hash 结构
+      qdrant:
+        initialize-schema: true
+        collection-name: knowledge_segment # Qdrant 中向量集合的名称：用于存储向量数据的集合标识符，所有相关的向量操作都会在这个集合中进行
+        host: 127.0.0.1
+        port: 6334
+      milvus:
+        initialize-schema: true
+        database-name: default # Milvus 中数据库的名称
+        collection-name: knowledge_segment # Milvus 中集合的名称：用于存储向量数据的集合标识符，所有相关的向量操作都会在这个集合中进行
+        client:
+          host: 127.0.0.1
+          port: 19530
+    openai: # OpenAI 官方
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+      api-key: ${OPENAI_API_KEY:sk-xxxx}
+    azure: # OpenAI 微软
+      openai:
+        endpoint: https://eastusprejade.openai.azure.com
+    anthropic: # Anthropic Claude
+      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+      api-key: ${ANTHROPIC_API_KEY:sk-xxxx}
+    ollama:
+      base-url: http://127.0.0.1:11434
+      chat:
+        model: llama3
+    stabilityai:
+      api-key: ${STABILITYAI_API_KEY:sk-xxxx}
+    dashscope: # 通义千问
+      api-key: ${DASHSCOPE_API_KEY:sk-xxxx}
+    deepseek: # DeepSeek
+      api-key: ${DEEPSEEK_API_KEY:sk-xxxx}
+      chat:
+        options:
+          model: deepseek-v4-flash
+    model:
+      rerank: false # 是否开启“通义千问”的 Rerank 模型，填写 dashscope 开启
+    mcp:
+      server:
+        enabled: false
+        name: enlev-mcp-server
+        version: 1.0.0
+        instructions: 一个 MCP 示例服务
+        sse-endpoint: /sse
+      client:
+        enabled: false
+        name: mcp
+        sse:
+          connections:
+            filesystem:
+              url: http://127.0.0.1:8089
+              sse-endpoint: /sse
+        annotation-scanner:
+          enabled: false # TODO @芋艿：有 bug https://github.com/spring-projects/spring-ai/issues/4917 需要官方修复
+
+enlev:
+  ai:
+    gemini: # 谷歌 Gemini
+      enable: true
+      api-key: ${GEMINI_API_KEY:sk-xxxx}
+      model: gemini-2.5-flash
+    doubao: # 字节豆包
+      enable: true
+      api-key: ${DOUBAO_API_KEY:sk-xxxx}
+      model: doubao-seed-2-1-turbo-260628
+    hunyuan: # 腾讯混元
+      enable: true
+      api-key: ${HUNYUAN_API_KEY:sk-xxxx}
+      model: hy3-preview
+    siliconflow: # 硅基流动
+      enable: true
+      api-key: ${SILICONFLOW_API_KEY:sk-xxxx}
+      model: deepseek-ai/DeepSeek-V4-Pro
+    xinghuo: # 讯飞星火
+      enable: true
+      api-key: ${XINGHUO_API_KEY:sk-xxxx}
+      model: x2-flash
+    baichuan: # 百川智能
+      enable: true
+      api-key: ${BAICHUAN_API_KEY:sk-xxxx}
+      model: Baichuan-M3
+    yiyan: # 文心一言
+      enable: false
+      api-key: ${YIYAN_API_KEY:sk-xxxx}
+      model: ernie-5.1
+    zhipu: # 智谱 AI（GLM）
+      enable: false
+      api-key: ${ZHIPU_API_KEY:sk-xxxx}
+      model: glm-5.2
+    minimax: # MiniMax
+      enable: false
+      api-key: ${MINIMAX_API_KEY:sk-xxxx}
+      model: MiniMax-M3
+    moonshot: # 月之暗面（KIMI）
+      enable: false
+      api-key: ${MOONSHOT_API_KEY:sk-xxxx}
+      model: kimi-k2.6
+    stepfun: # 阶跃星辰
+      enable: false
+      api-key: ${STEPFUN_API_KEY:sk-xxxx}
+      model: step-3.7-flash
+    grok: # Grok
+      enable: false
+      api-key: ${GROK_API_KEY:sk-xxxx}
+      model: grok-4.3
+    midjourney:
+      enable: true
+  #    base-url: https://api.holdai.top/mj-relax/mj
+      base-url: https://api.holdai.top/mj
+      api-key: ${MIDJOURNEY_API_KEY:sk-xxxx}
+      notify-url: http://java.nat300.top/admin-api/ai/image/midjourney/notify
+    suno:
+      enable: true
+  #    base-url: https://suno-55ishh05u-status2xxs-projects.vercel.app
+      base-url: http://127.0.0.1:3001
+    web-search:
+      enable: true
+      api-key: ${WEB_SEARCH_API_KEY:sk-xxxx}
+
+--- #################### 启凌智搭相关配置 ####################
+
+enlev:
+  info:
+    version: 1.0.0
+    base-package: cn.enlev.ainb
+  web:
+    admin-ui:
+      url: http://dashboard.enlev.cn # Admin 管理后台 UI 的地址
+  xss:
+    enable: false
+    exclude-urls: # 如下两个 url，仅仅是为了演示，去掉配置也没关系
+      - ${spring.boot.admin.context-path}/** # 不处理 Spring Boot Admin 的请求
+      - ${management.endpoints.web.base-path}/** # 不处理 Actuator 的请求
+  security:
+    permit-all_urls:
+      - /admin-api/mp/open/** # 微信公众号开放平台，微信回调接口，不需要登录
+  api-encrypt:
+    enable: false # 是否开启 API 加密。默认关闭，避免低版本 JDK 8（8u120 以下）启动时 bcprov 的 JCE 认证报错
+    algorithm: AES # 加密算法，支持 AES、RSA 等
+    request-key: 52549111389893486934626385991395 # 【AES 案例】请求加密的秘钥，，必须 16、24、32 位
+    response-key: 96103715984234343991809655248883 # 【AES 案例】响应加密的秘钥，AES 案例，必须 16、24、32 位
+#    request-key: MIICdwIBADANBgkqhkiG9w0BAQEFAASCAmEwggJdAgEAAoGBAKWzasimcZ1icsWDPVdTXcZs1DkOWjI+m9bTQU8aOqflnomkr6QO1WWeSHBHzuJGsTlV/ZY2pFfq/NstKC94hBjx7yioYJvzb2bKN/Uy4j5nM3iCF//u0RiFkkY8j0Bt/EWoFTOb6RHf8cHIAjbYYtP3pYzbpCIwryfe0g//KIuzAgMBAAECgYADDjZrYcpZjR2xr7RbXmGtzYbyUGXwZEAqa3XaWBD51J2iSyOkAlQEDjGmxGQ3vvb4qDHHadWI+3/TKNeDXJUO+xTVJrnismK5BsHyC6dfxlIK/5BAuknryTca/3UoA1yomS9ZlF3Q0wcecaDoEnSmZEaTrp9T3itPAz4KnGjv5QJBAN5mNcfu6iJ5ktNvEdzqcxkKwbXb9Nq1SLnmTvt+d5TPX7eQ9fCwtOfVu5iBLhhZzb5PJ7pSN3Zt6rl5/jPOGv0CQQC+vETX9oe1wbxZSv6/RBGy0Xow6GndbJwvd89PcAJ2h+OJXWtg/rRHB3t9EQm7iis0XbZTapj19E4U6l8EibhvAkEA1CvYpRwmHKu1SqdM+GBnW/2qHlBwwXJvpoK02TOm674HR/4w0+YRQJfkd7LOAgcyxJuJgDTNmtt0MmzS+iNoFQJAMVSUIZ77XoDq69U/qcw7H5qaFcgmiUQr6QL9tTftCyb+LGri+MUnby96OtCLSdvkbLjIDS8GvKYhA7vSM2RDNQJBAKGyVVnFFIrbK3yuwW71yvxQEGoGxlgvZSezZ4vGgqTxrr9HvAtvWLwR6rpe6ybR/x8uUtoW7NRBWgpiIFwjvY4= # 【RSA 案例】请求解密的私钥
+#    response-key: MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDh/CHyBcS/zEfVyINVA7+c9Xxl0CPdxPMK1OIjxaLy/7BLfbkoEpI8onQtjuzfpuxCraDem9bu3BMF0pMH95HytI3Vi0kGjaV+WLIalwgc2w37oA2sbsmKzQOP7SDLO5s2QJNAD7kVwd+Q5rqaLu2MO0xVv+0IUJhn83hClC0L5wIDAQAB # 【RSA 案例】响应加密的公钥
+  websocket:
+    enable: true # websocket的开关
+    path: /infra/ws # 路径
+    sender-type: local # 消息发送的类型，可选值为 local、redis、rocketmq、kafka、rabbitmq
+    sender-rocketmq:
+      topic: ${spring.application.name}-websocket # 消息发送的 RocketMQ Topic
+      consumer-group: ${spring.application.name}-websocket-consumer # 消息发送的 RocketMQ Consumer Group
+    sender-rabbitmq:
+      exchange: ${spring.application.name}-websocket-exchange # 消息发送的 RabbitMQ Exchange
+      queue: ${spring.application.name}-websocket-queue # 消息发送的 RabbitMQ Queue
+    sender-kafka:
+      topic: ${spring.application.name}-websocket # 消息发送的 Kafka Topic
+      consumer-group: ${spring.application.name}-websocket-consumer # 消息发送的 Kafka Consumer Group
+  swagger:
+    title: 启凌智搭快速开发平台
+    description: 提供管理后台、用户 App 的所有功能
+    version: ${enlev.info.version}
+    url: ${enlev.web.admin-ui.url}
+    email: xingyu4j@vip.qq.com
+    license: MIT
+    license-url: https://gitee.com/enlev/ainb/blob/master/LICENSE
+  codegen:
+    base-package: ${enlev.info.base-package}
+    db-schemas: ${spring.datasource.dynamic.datasource.master.name}
+    front-type: 20 # 前端模版的类型，参见 CodegenFrontTypeEnum 枚举类
+    vo-type: 10 # VO 的类型，参见 CodegenVOTypeEnum 枚举类
+    delete-batch-enable: true # 是否生成批量删除接口
+    unit-test-enable: false # 是否生成单元测试
+    import-enable: false # 是否生成 Excel 导入接口
+  data-model: # 数据建模的「建模规范」，详见 docs/数据建模规范.md
+    # 下面这些管的是「别把库搞乱」（命名、前缀、注释、配额），可按需关闭；
+    # 而「别把库搞坏」那一类（保留字、标识符白名单、框架表黑名单）在 SqlSafeGuard 里硬编码，任何时候都不可关。
+    #
+    # ⚠️ 全部只作用于【新建】路径。importTables 导入存量表一律放行 ——
+    # 否则库里本就存在的 QRTZ_*（大写）、test_demo_*（无 biz_ 前缀）全都导不进来。
+    table-prefix-enforced: true # 是否强制业务表前缀
+    table-prefix: biz_ # 业务表前缀。与框架表黑名单是两道独立关卡，都要过
+    snake-case-enforced: true # 是否强制 snake_case（禁驼峰：Linux 下 lower_case_table_names=0 时表名大小写敏感）
+    index-prefix-enforced: true # 是否强制索引名前缀：UNIQUE 用 uk_、NORMAL 用 idx_
+    max-column-count: 100 # 单表列数上限，0 = 不限。超过通常说明该拆表了（实测存量库最大 41 列，不会误伤）
+    # 单租户模型数上限，0 = 不限。⚠️ 默认不限是刻意的：本项按总数算，存量直接决定还能不能建新表
+    # （实测本地库租户 1 已有 286 个模型，给个 200 就等于让所有人都建不了表）。
+    # 接入 AI 等带重试循环的调用方之前，再按实际情况显式配一个上限。
+    max-table-count: 0
+  permission: # 权限体系（S1~S5 重构）
+    # 是否走新的授权决策引擎（sys_resource + sys_grant）。
+    #
+    # false 时 @ss.hasPermission 走旧路径：在 system_menu 里按权限串找菜单，
+    # 「找不到对应 Menu 即判无权限」。而数据集动作（infra:form-design-run:xxx:query）
+    # 只存在于 sys_resource —— 于是非超管在【所有】在线表单数据集上寸步难行，
+    # 超管则因短路而毫无察觉。
+    #
+    # 切换前已做过对账（S5c）：旧路径放行 1549 对(角色,权限)，新引擎 1550 对，
+    # 【旧有新无 = 0】，即没有任何权限点会因切换而被误杀。
+    grant-enabled: true
+    # 是否走「资源身份 × 动作」塌缩后的读路径（权限资源统一方案 阶段 2）。
+    #
+    # 🔴 这个开关与数据迁移必须同批：数据没迁就打开，判定会去查一批还不存在的身份行，
+    # 结果是静默判成无权（全程 200、无异常，只是按钮全没了、接口全 403）。
+    # 反过来（迁了没开）同样错，只是错得更明显。所以它在这里被显式打开，
+    # 而不是留着靠 PermissionProperties 的默认 false —— 默认值一旦生效，
+    # 表现就是「迁移跑完了、权限全没了」，而且没有任何日志说明原因。
+    #
+    # 打开前已完成的验证（阶段 2d，本地库 ruoyi-vue-pro）：
+    #   · 落库 sys_resource 1022 → 598 存活行（退役 457、新建 33、menu_id 改 64、
+    #     default_effect 改 7）；sys_grant 1802 → 1787（改写 1127、判重软删 15、原样 660）
+    #   · 落库前用整表校验和（逐行 MD5 再聚合）比对库与快照，八项全对才允许执行
+    #   · 落库在单个事务里，事务内后置守卫比对行数/悬空引用/97 个身份串后才 COMMIT
+    #   · 落库后把 598 + 1787 行按列导出，与计划器+应用器算出的期望世界 diff，差为空
+    #   · 自校验 CollapseMigrationSelfCheckTest 5/5 通过：hasExplicitDeny、
+    #     resolveFieldModes、listAllowedMenuIds 差异均为 0；hasPermission 的 617 个差异
+    #     全部落在声明白名单内（464 个收紧来自那 7 行 default_effect 翻转，
+    #     153 个放开来自 57 个裸身份串 —— 全库检索确认没有任何生产代码比对裸身份串）
+    #
+    # ⚠️ 上一行那句话别读成「153 个放开无害」。它只说明<b>裸身份串</b>没有生产代码在比；
+    #    而 FormDesignRuntimeController#checkPermission 比的是<b>带动词</b>的
+    #    infra:form-design-run:{code}:{action}，塌缩后它会被翻译成同一个身份行去查 ——
+    #    身份行 default_effect=ALLOW 且链上零授权时，判定回落成放行。
+    #    自校验枚举不到这批串（它只从 system_menu.permission 取，而这些锚点 menu_id 为 NULL）。
+    #    实测已打穿 3 张已发布表单（非超管、零授权，/config 与 /page 均返回 code=0 与真实数据行）。
+    #    完整口径与处置见 GrantDecisionService#lookupOf 里那段 ⚠️ 注释（唯一权威副本）。
+    collapse-enabled: true
+    # 派生可见性的业务主键数告警阈值。超过只打 ERROR，不改变行为 ——
+    # 截断会静默少数据、拒绝会让「参与得越多看到的越少」，两者都比慢查询糟糕
+    derived-key-warn-threshold: 5000
+    subject:
+      # 部门是否作为授权主体。
+      #
+      # v10 §7.2 定的是「模型支持、默认关闭」，这里【显式打开】，原因是 S7b 摘掉了
+      # 流程发起范围的存量回落：flowable 流程定义上的 startDeptIds 现在被投影成
+      # DEPT 主体的 START 授权（不能在投影时展开成该部门当前的成员 ——
+      # 那样之后调进这个部门的人就不会自动获得发起权，而配置界面上部门名还写着）。
+      #
+      # 关着的话表现是：在流程设计器里配了「研发部可发起」，保存成功、
+      # 授权行也插进去了，研发部的人却一个都发不了，且没有任何提示。
+      #
+      # ⚠️ 打开前已确认影响面为零：库里此前【没有任何 DEPT 主体的授权行】，
+      # 所以这个开关在打开的瞬间不会改变任何既有判定。
+      # v10 当初担心的是「把数据范围误配成功能授权」，那是授权界面该防的事（S8）
+      dept-enabled: true
+  tenant: # 多租户相关配置项
+    enable: true
+    ignore-urls:
+      - /jmreport/* # 积木报表，无法携带租户编号
+    ignore-visit-urls:
+      - /admin-api/system/user/profile/**
+      - /admin-api/system/auth/**
+    ignore-tables:
+      # 模型单价是平台与厂商之间的事实，与租户无关 —— 同一个模型不会因为换个租户就换个进价。
+      # 不登记在这里的话，租户拦截器会给它拼 tenant_id，而该表没有这一列，
+      # 表现是「Unknown column 'tenant_id'」并且【把整条计量记录一起丢掉】
+      - agent_model_price
+    ignore-caches:
+      - user_role_ids
+      - permission_menu_ids
+      - oauth_client
+      - notify_template
+      - mail_account
+      - mail_template
+      - sms_template
+      - iot:device
+      - iot:thing_model_list
+  sms-code: # 短信验证码相关的配置项
+    expire-times: 10m
+    send-frequency: 1m
+    send-maximum-quantity-per-day: 10
+    begin-code: 9999 # 这里配置 9999 的原因是，测试方便。
+    end-code: 9999 # 这里配置 9999 的原因是，测试方便。
+  trade:
+    order:
+      pay-expire-time: 2h # 支付的过期时间
+      receive-expire-time: 14d # 收货的过期时间
+      comment-expire-time: 7d # 评论的过期时间
+      status-sync-to-wxa-enable: true # 是否同步订单状态到微信小程序
+    express:
+      client: kd_100
+      kd-niao:
+        api-key: cb022f1e-48f1-4c4a-a723-9001ac9676b8
+        business-id: 1809751
+        request-type: 1002 # 免费版 1002；付费版 8001
+      kd100:
+        key: pLXUGAwK5305
+        customer: E77DF18BE109F454A5CD319E44BF5177
+  iot:
+    message-bus:
+      type: redis # 消息总线的类型
+  agent: # AI 助手 / 流程编排模块（enlev-module-agent）
+    webhook: # Webhook 匿名入站端点的配置。详见 AgentWebhookProperties 的字段注释
+      # 🔴 这是 agent 模块唯一的匿名可达面（@PermitAll），每一次命中都是一次「无头拉起流程」
+      #    （烧 token、写业务数据、占图执行线程）。验签只能证明请求来自持密钥者，
+      #    证明不了他没在一秒内发一万个 —— 所以必须有按量计量的闸门。
+      rate-limit-enabled: true # 关掉 = 本端点回到「谁都能打」，只在限流器自己成为故障源时用来止血
+      # IP 维度：挡「单个来源刷量」。阈值刻意低于 path 维度，故单个来源永远撞不到 path 层。
+      # 🔴 来源 IP 取自 X-Forwarded-For / X-Real-IP 等客户端可控的头（ServletUtils.getClientIP 的默认行为），
+      #    没有可信反代兜住这些头时，直连客户端改一个头就能换掉自己的「IP」——
+      #    真正承重的是下面那层 path 维度，这也是两层必须 AND 而不是 OR 的原因。
+      rate-limit-ip-count: 60 # 单 IP 每窗口最多放行 60 个（平均 1 秒 1 个，够正当对接方的突发余量）
+      rate-limit-ip-window-seconds: 60
+      # path 维度：护「一个 hook 背后那条流程的 token 预算与写库次数」，按被保护的资源计数、跨所有来源合计。
+      # 它不看来源，所以伪造 IP 对它无效 —— 一百台机器各发 50 个时，IP 层一个都不拦，这一层拦。
+      rate-limit-path-count: 300 # 单 path 每窗口最多放行 300 个（所有来源 IP 合计）
+      rate-limit-path-window-seconds: 60 # 与 IP 层同取 60，让两层窗口对齐，排障时好解释「哪层先撞墙」
+      # body 整体上限（B2-4 的「第一道闸」）。量的是【整个原始 body】，与下面 sanitize.webhook-body-max-length
+      # 量的【单个字符串叶子】是两个不同的量，两个都要有：一个 body 可以每个叶子都合规、
+      # 却靠「叶子特别多」把总量堆到几百 MB —— 只按叶子限长的话，我们要把它整个解析、整个遍历完才知道。
+      # 两道闸的动作也不同：这道【拒】（调用方拿到非零 code，知情），叶子那道【截】（调用方仍是 200，不知情）。
+      # 阈值刻意比叶子档高一个数量级还多：它管的是「荒谬的量」，不是「单字段该多长」。
+      # 收得跟叶子档一样紧，结局是正当对接方天天撞墙、最后现场把它调大到形同虚设，那比一开始就宽松更糟。
+      # ⚠️ 这道闸【不】护内存：走到这里时 Spring 已把整个 body 读进 String 了，
+      #    而 application/json 不受 Tomcat maxPostSize 约束（容器层默认没有字节上限）。
+      #    它的职责是「别为注定被削减的请求付解析代价」+「让调用方知情」。详见 WORKFLOW_WEBHOOK_BODY_TOO_LARGE。
+      max-body-length: 1048576 # 1 MiB
+    sanitize: # 不可信输入进 state 之前的处置档位。详见 AgentSanitizeProperties 的字段注释
+      # 🔴 五个污点源各有各的合理上限，差着两个数量级：检索片段是被切过块的（几千字符就异常），
+      #    webhook body 是机器对机器的整张订单 JSON（几万字符正常）。给同一个数只有两种结局——
+      #    取小值把合法业务数据截成半截且不报错，取大值等于对检索片段不设防。
+      # 🔴 限的是「单个字符串叶子」，不是整个 body 的字节数：body 解析成 map 后逐个叶子过。
+      chat-max-length: 4000 # 人在输入框里打字；每个字符都逐字进 prompt，是直接按 token 计钱的
+      webhook-body-max-length: 32768 # 机器对机器，含几十个明细行的订单 JSON 是正当形状
+      form-event-value-max-length: 8192 # 表单里的长文本是业务数据（会写回库），被截的代价比聊天高
+      retrieval-segment-max-length: 4000 # 🔴 五档里最该收紧的：谁能往知识库传文件，谁就能往 prompt 里写字，
+      #   而知识库上传权限与流程编辑权限不是同一个权限 ⟹ 攻击者门槛最低、且内容 100% 逐字进 prompt
+      tool-result-max-length: 16384 # 外部系统响应，长度不由我们控制；宁可给大让它完整地被包进数据段，
+      #   也不要截断后让残留的半句话落在包裹之外
+      max-depth: 16 # 递归深度上限。🔴 这不是「精细度」参数，是「别把线程搞死」参数：
+      #   无界递归抛的 StackOverflowError 不是 Exception，执行层那些 catch(Exception) 一个都拦不住。
+      #   超限的处置是丢弃该子树 + warn，不是原样保留（原样保留 = 让没处置过的值进 state）
+      # 🔴 刻意不留「总开关」：本组件是纯字符串处理、不碰外部依赖，不会自己成为故障源。
+      #    关掉它能换来的只有「控制字符不再被剥、超长内容不再被截」——那不是止血，是把防线拆了。
+      #    单个源挡住合法数据时，调那一个源的档位即可。
+
+debug: false

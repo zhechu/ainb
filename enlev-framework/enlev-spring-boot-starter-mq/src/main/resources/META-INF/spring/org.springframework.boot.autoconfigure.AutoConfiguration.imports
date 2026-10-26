@@ -1,0 +1,3 @@
+cn.enlev.ainb.framework.mq.redis.config.EnlevRedisMQProducerAutoConfiguration
+cn.enlev.ainb.framework.mq.redis.config.EnlevRedisMQConsumerAutoConfiguration
+cn.enlev.ainb.framework.mq.rabbitmq.config.EnlevRabbitMQAutoConfiguration

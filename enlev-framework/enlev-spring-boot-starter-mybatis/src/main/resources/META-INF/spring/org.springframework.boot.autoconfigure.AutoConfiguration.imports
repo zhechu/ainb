@@ -1,0 +1,3 @@
+cn.enlev.ainb.framework.datasource.config.EnlevDataSourceAutoConfiguration
+cn.enlev.ainb.framework.mybatis.config.EnlevMybatisAutoConfiguration
+cn.enlev.ainb.framework.translate.config.EnlevTranslateAutoConfiguration

@@ -1,0 +1,839 @@
+{
+  "_comment": [
+    "联动规则求值器的跨端一致性用例集。",
+    "",
+    "前端（Vitest）与后端（JUnit）读同一份用例各跑一遍。任一侧行为漂移，那一侧就会红。",
+    "这是「服务端复校验」能成立的前提 —— 前端算出某字段必填、后端提交时也必须算出必填，",
+    "两边不一致的话，用户会遇到「界面上填完了但提交被拒」或反过来「该拦的没拦住」。",
+    "",
+    "⚠️ 本文件在前后端各有一份副本，规范副本在后端 resources 下。",
+    "改动必须两侧同步，一致性由 e2e 用例守着（详见同目录 SYNC.md）。",
+    "",
+    "## 求值语义（两端必须完全一致）",
+    "",
+    "1. 只处理 enabled != false 且 trigger 匹配的规则。",
+    "2. 规则按声明顺序求值；同一字段同一维度被多条规则设置时，后者覆盖前者。",
+    "3. when 为空（null 或 items 为空）视为恒真。",
+    "4. 条件不满足时执行 otherwise（若有）。只写 then 不写 otherwise 是同类产品最常见的坑 ——",
+    "   条件从满足变回不满足时字段不会恢复。",
+    "5. rowScope 非空的规则是【行作用域】规则：作用在子表明细行上，对每一行各求值一次，",
+    "   条件与动作里的字段名指的是明细列。本用例集只覆盖主表作用域 —— 行作用域的",
+    "   语义由后端 FormLogicGuardTest 覆盖，因为它涉及子表数据结构而非求值器本身。",
+    "6. 有限次不动点迭代：最多 MAX_PASSES=10 轮，每轮重算全部规则，",
+    "   直到 (字段状态, 数据) 不再变化为止。这样 A→B→C 的链式联动才能生效。",
+    "   超过 10 轮仍不稳定则停止并标记 stable=false（不抛异常 —— 提交流程不该因为",
+    "   一条配歪的规则整体失败）。",
+    "7. 字段的基础状态：visible=true、editable=true、required 取自控件规则的 $required。",
+    "   规则没碰到的字段保持基础状态。",
+    "8. GT/GE/LT/LE 的比较语义：两边都能转成数字时按数值比；两边都是【非空字符串】时",
+    "   按字典序比（日期区间靠的就是这条 —— 日期控件产出 ISO 格式，字典序与时间先后一致）；",
+    "   其余情况（一侧数字一侧文本、含空串、布尔）一律判为不可比较，条件不满足。",
+    "",
+    "## 用例字段",
+    "",
+    "  name        用例名，失败时用于定位",
+    "  trigger     本次求值的触发时机",
+    "  baseState   字段的基础状态，省略的字段按 visible/editable=true、required=false",
+    "  data        求值前的表单数据",
+    "  rules       规则列表",
+    "  expect      期望结果：state（各字段最终状态）、data（求值后的数据）、stable",
+    "              expect.state 只需写出关心的字段与维度，未写的不校验"
+  ],
+
+  "casesVersion": 1,
+  "maxPasses": 10,
+
+  "cases": [
+    {
+      "name": "空条件视为恒真",
+      "trigger": "CHANGE",
+      "data": {},
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [{ "type": "HIDE", "target": "b" }]
+        }
+      ],
+      "expect": { "state": { "b": { "visible": false } }, "stable": true }
+    },
+    {
+      "name": "items 为空的条件组也视为恒真",
+      "trigger": "CHANGE",
+      "data": {},
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [] },
+          "then": [{ "type": "REQUIRE", "target": "b" }]
+        }
+      ],
+      "expect": { "state": { "b": { "required": true } }, "stable": true }
+    },
+
+    {
+      "name": "EQ 相等",
+      "trigger": "CHANGE",
+      "data": { "type": "A" },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "type", "operator": "EQ", "value": "A" }] },
+          "then": [{ "type": "SHOW", "target": "detail" }],
+          "otherwise": [{ "type": "HIDE", "target": "detail" }]
+        }
+      ],
+      "expect": { "state": { "detail": { "visible": true } }, "stable": true }
+    },
+    {
+      "name": "⚠️ 条件不满足时走 otherwise，字段要恢复",
+      "trigger": "CHANGE",
+      "data": { "type": "B" },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "type", "operator": "EQ", "value": "A" }] },
+          "then": [{ "type": "SHOW", "target": "detail" }],
+          "otherwise": [{ "type": "HIDE", "target": "detail" }]
+        }
+      ],
+      "expect": { "state": { "detail": { "visible": false } }, "stable": true }
+    },
+    {
+      "name": "条件不满足且没有 otherwise 时，字段保持基础状态",
+      "trigger": "CHANGE",
+      "data": { "type": "B" },
+      "baseState": { "detail": { "visible": true } },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "type", "operator": "EQ", "value": "A" }] },
+          "then": [{ "type": "HIDE", "target": "detail" }]
+        }
+      ],
+      "expect": { "state": { "detail": { "visible": true } }, "stable": true }
+    },
+
+    {
+      "name": "EQ 数字与字符串宽松比较：表单值常是字符串",
+      "trigger": "CHANGE",
+      "data": { "level": "3" },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "level", "operator": "EQ", "value": 3 }] },
+          "then": [{ "type": "REQUIRE", "target": "reason" }]
+        }
+      ],
+      "expect": { "state": { "reason": { "required": true } }, "stable": true }
+    },
+    {
+      "name": "NE 不相等",
+      "trigger": "CHANGE",
+      "data": { "type": "B" },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "type", "operator": "NE", "value": "A" }] },
+          "then": [{ "type": "REQUIRE", "target": "reason" }]
+        }
+      ],
+      "expect": { "state": { "reason": { "required": true } }, "stable": true }
+    },
+    {
+      "name": "数值比较 GT / GE / LT / LE",
+      "trigger": "CHANGE",
+      "data": { "amount": 10000 },
+      "rules": [
+        {
+          "id": "gt",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "amount", "operator": "GT", "value": 9999 }] },
+          "then": [{ "type": "REQUIRE", "target": "gt" }]
+        },
+        {
+          "id": "ge",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "amount", "operator": "GE", "value": 10000 }] },
+          "then": [{ "type": "REQUIRE", "target": "ge" }]
+        },
+        {
+          "id": "lt",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "amount", "operator": "LT", "value": 10000 }] },
+          "then": [{ "type": "REQUIRE", "target": "lt" }]
+        },
+        {
+          "id": "le",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "amount", "operator": "LE", "value": 10000 }] },
+          "then": [{ "type": "REQUIRE", "target": "le" }]
+        }
+      ],
+      "expect": {
+        "state": {
+          "gt": { "required": true },
+          "ge": { "required": true },
+          "lt": { "required": false },
+          "le": { "required": true }
+        },
+        "stable": true
+      }
+    },
+    {
+      "name": "⚠️ 非数值参与数值比较时判为不满足，而不是抛错",
+      "trigger": "CHANGE",
+      "data": { "amount": "不是数字" },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "amount", "operator": "GT", "value": 100 }] },
+          "then": [{ "type": "REQUIRE", "target": "reason" }]
+        }
+      ],
+      "expect": { "state": { "reason": { "required": false } }, "stable": true }
+    },
+    {
+      "name": "⚠️ 两边都是文本时按字典序比较 —— 日期区间靠的就是这条",
+      "trigger": "CHANGE",
+      "data": { "startDate": "2026-09-01", "endDate": "2026-09-10", "sameDate": "2026-09-01" },
+      "rules": [
+        {
+          "id": "later",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "endDate", "operator": "GT", "valueType": "FIELD", "value": "startDate" }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "later" }]
+        },
+        {
+          "id": "equal",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "sameDate", "operator": "GE", "valueType": "FIELD", "value": "startDate" }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "equal" }]
+        },
+        {
+          "id": "earlier",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "startDate", "operator": "LT", "valueType": "FIELD", "value": "endDate" }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "earlier" }]
+        },
+        {
+          "id": "wrong",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "startDate", "operator": "GT", "valueType": "FIELD", "value": "endDate" }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "wrong" }]
+        }
+      ],
+      "expect": {
+        "state": {
+          "later": { "required": true },
+          "equal": { "required": true },
+          "earlier": { "required": true },
+          "wrong": { "required": false }
+        },
+        "stable": true
+      }
+    },
+    {
+      "name": "⚠️ 文本比较里的空串仍判为不可比较 —— 否则没填完的日期会被区间校验拦下",
+      "trigger": "CHANGE",
+      "data": { "startDate": "2026-09-01", "endDate": "" },
+      "rules": [
+        {
+          "id": "ge",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "endDate", "operator": "GE", "valueType": "FIELD", "value": "startDate" }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "ge" }]
+        },
+        {
+          "id": "le",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "endDate", "operator": "LE", "valueType": "FIELD", "value": "startDate" }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "le" }]
+        }
+      ],
+      "expect": {
+        "state": { "ge": { "required": false }, "le": { "required": false } },
+        "stable": true
+      }
+    },
+
+    {
+      "name": "IN / NOT_IN",
+      "trigger": "CHANGE",
+      "data": { "city": "杭州" },
+      "rules": [
+        {
+          "id": "in",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "city", "operator": "IN", "value": ["杭州", "上海"] }]
+          },
+          "then": [{ "type": "REQUIRE", "target": "in" }]
+        },
+        {
+          "id": "notin",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "city", "operator": "NOT_IN", "value": ["北京"] }]
+          },
+          "then": [{ "type": "REQUIRE", "target": "notin" }]
+        }
+      ],
+      "expect": {
+        "state": { "in": { "required": true }, "notin": { "required": true } },
+        "stable": true
+      }
+    },
+    {
+      "name": "多选字段用 CONTAINS 判断是否含某项",
+      "trigger": "CHANGE",
+      "data": { "tags": ["vip", "new"] },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "tags", "operator": "CONTAINS", "value": "vip" }]
+          },
+          "then": [{ "type": "SHOW", "target": "vipArea" }]
+        }
+      ],
+      "expect": { "state": { "vipArea": { "visible": true } }, "stable": true }
+    },
+    {
+      "name": "CONTAINS 作用在字符串上是子串判断",
+      "trigger": "CHANGE",
+      "data": { "remark": "这是一段包含关键字的说明" },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "remark", "operator": "CONTAINS", "value": "关键字" }]
+          },
+          "then": [{ "type": "REQUIRE", "target": "reason" }]
+        }
+      ],
+      "expect": { "state": { "reason": { "required": true } }, "stable": true }
+    },
+    {
+      "name": "STARTS_WITH / ENDS_WITH",
+      "trigger": "CHANGE",
+      "data": { "code": "SO-2026-001" },
+      "rules": [
+        {
+          "id": "sw",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "code", "operator": "STARTS_WITH", "value": "SO-" }]
+          },
+          "then": [{ "type": "REQUIRE", "target": "sw" }]
+        },
+        {
+          "id": "ew",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "code", "operator": "ENDS_WITH", "value": "001" }]
+          },
+          "then": [{ "type": "REQUIRE", "target": "ew" }]
+        }
+      ],
+      "expect": {
+        "state": { "sw": { "required": true }, "ew": { "required": true } },
+        "stable": true
+      }
+    },
+    {
+      "name": "EMPTY / NOT_EMPTY：空串、空数组、null 都算空",
+      "trigger": "CHANGE",
+      "data": { "a": "", "b": [], "c": null, "d": "有值", "e": 0 },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "a", "operator": "EMPTY" },
+              { "field": "b", "operator": "EMPTY" },
+              { "field": "c", "operator": "EMPTY" },
+              { "field": "missing", "operator": "EMPTY" },
+              { "field": "d", "operator": "NOT_EMPTY" }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "ok" }]
+        },
+        {
+          "id": "r2",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "e", "operator": "EMPTY" }] },
+          "then": [{ "type": "REQUIRE", "target": "zeroIsEmpty" }]
+        }
+      ],
+      "expect": {
+        "state": { "ok": { "required": true }, "zeroIsEmpty": { "required": false } },
+        "stable": true
+      }
+    },
+    {
+      "name": "BETWEEN 闭区间",
+      "trigger": "CHANGE",
+      "data": { "age": 30 },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "age", "operator": "BETWEEN", "value": [18, 30] }]
+          },
+          "then": [{ "type": "REQUIRE", "target": "ok" }]
+        }
+      ],
+      "expect": { "state": { "ok": { "required": true } }, "stable": true }
+    },
+
+    {
+      "name": "valueType=FIELD：与另一个字段的值比较",
+      "trigger": "CHANGE",
+      "data": { "endDate": 20, "startDate": 10 },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "endDate", "operator": "GT", "valueType": "FIELD", "value": "startDate" }
+            ]
+          },
+          "then": [{ "type": "SHOW", "target": "duration" }],
+          "otherwise": [{ "type": "HIDE", "target": "duration" }]
+        }
+      ],
+      "expect": { "state": { "duration": { "visible": true } }, "stable": true }
+    },
+
+    {
+      "name": "AND：一项不满足则整组不满足",
+      "trigger": "CHANGE",
+      "data": { "a": 1, "b": 2 },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "a", "operator": "EQ", "value": 1 },
+              { "field": "b", "operator": "EQ", "value": 99 }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "x" }]
+        }
+      ],
+      "expect": { "state": { "x": { "required": false } }, "stable": true }
+    },
+    {
+      "name": "OR：一项满足即整组满足",
+      "trigger": "CHANGE",
+      "data": { "a": 1, "b": 2 },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "OR",
+            "items": [
+              { "field": "a", "operator": "EQ", "value": 99 },
+              { "field": "b", "operator": "EQ", "value": 2 }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "x" }]
+        }
+      ],
+      "expect": { "state": { "x": { "required": true } }, "stable": true }
+    },
+    {
+      "name": "条件组嵌套：A AND (B OR C)",
+      "trigger": "CHANGE",
+      "data": { "a": 1, "b": 0, "c": 3 },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [
+              { "field": "a", "operator": "EQ", "value": 1 },
+              {
+                "logic": "OR",
+                "items": [
+                  { "field": "b", "operator": "EQ", "value": 9 },
+                  { "field": "c", "operator": "EQ", "value": 3 }
+                ]
+              }
+            ]
+          },
+          "then": [{ "type": "REQUIRE", "target": "x" }]
+        }
+      ],
+      "expect": { "state": { "x": { "required": true } }, "stable": true }
+    },
+
+    {
+      "name": "各动作类型都生效",
+      "trigger": "CHANGE",
+      "data": {},
+      "baseState": {
+        "f1": { "visible": true },
+        "f2": { "editable": true },
+        "f3": { "required": false },
+        "f4": { "editable": true }
+      },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [
+            { "type": "HIDE", "target": "f1" },
+            { "type": "DISABLE", "target": "f2" },
+            { "type": "REQUIRE", "target": "f3" },
+            { "type": "READONLY", "target": "f4" },
+            { "type": "SHOW", "target": "f5" },
+            { "type": "ENABLE", "target": "f6" },
+            { "type": "OPTIONAL", "target": "f7" },
+            { "type": "EDITABLE", "target": "f8" }
+          ]
+        }
+      ],
+      "expect": {
+        "state": {
+          "f1": { "visible": false },
+          "f2": { "editable": false },
+          "f3": { "required": true },
+          "f4": { "editable": false },
+          "f5": { "visible": true },
+          "f6": { "editable": true },
+          "f7": { "required": false },
+          "f8": { "editable": true }
+        },
+        "stable": true
+      }
+    },
+    {
+      "name": "SET_VALUE 写入数据，CLEAR_VALUE 清空",
+      "trigger": "CHANGE",
+      "data": { "old": "要被清掉" },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [
+            { "type": "SET_VALUE", "target": "filled", "payload": { "value": "自动填的" } },
+            { "type": "CLEAR_VALUE", "target": "old" }
+          ]
+        }
+      ],
+      "expect": { "data": { "filled": "自动填的", "old": null }, "stable": true }
+    },
+
+    {
+      "name": "⚠️ 同一字段同一维度被多条规则设置时，后声明的覆盖前面的",
+      "trigger": "CHANGE",
+      "data": {},
+      "rules": [
+        {
+          "id": "first",
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [{ "type": "HIDE", "target": "x" }]
+        },
+        {
+          "id": "second",
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [{ "type": "SHOW", "target": "x" }]
+        }
+      ],
+      "expect": { "state": { "x": { "visible": true } }, "stable": true }
+    },
+    {
+      "name": "enabled=false 的规则被跳过",
+      "trigger": "CHANGE",
+      "data": {},
+      "rules": [
+        {
+          "id": "r1",
+          "enabled": false,
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [{ "type": "HIDE", "target": "x" }]
+        }
+      ],
+      "expect": { "state": { "x": { "visible": true } }, "stable": true }
+    },
+    {
+      "name": "enabled 缺省视为启用",
+      "trigger": "CHANGE",
+      "data": {},
+      "rules": [
+        { "id": "r1", "trigger": "CHANGE", "when": null, "then": [{ "type": "HIDE", "target": "x" }] }
+      ],
+      "expect": { "state": { "x": { "visible": false } }, "stable": true }
+    },
+    {
+      "name": "trigger 不匹配的规则被跳过",
+      "trigger": "SUBMIT",
+      "data": {},
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [{ "type": "HIDE", "target": "x" }]
+        },
+        {
+          "id": "r2",
+          "trigger": "SUBMIT",
+          "when": null,
+          "then": [{ "type": "REQUIRE", "target": "y" }]
+        }
+      ],
+      "expect": {
+        "state": { "x": { "visible": true }, "y": { "required": true } },
+        "stable": true
+      }
+    },
+
+    {
+      "name": "⚠️ 链式联动 A→B→C 靠不动点迭代生效",
+      "trigger": "CHANGE",
+      "data": { "a": 1 },
+      "rules": [
+        {
+          "id": "a2b",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "a", "operator": "EQ", "value": 1 }] },
+          "then": [{ "type": "SET_VALUE", "target": "b", "payload": { "value": 2 } }]
+        },
+        {
+          "id": "b2c",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "b", "operator": "EQ", "value": 2 }] },
+          "then": [{ "type": "SET_VALUE", "target": "c", "payload": { "value": 3 } }]
+        },
+        {
+          "id": "c2req",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "c", "operator": "EQ", "value": 3 }] },
+          "then": [{ "type": "REQUIRE", "target": "d" }]
+        }
+      ],
+      "expect": {
+        "data": { "b": 2, "c": 3 },
+        "state": { "d": { "required": true } },
+        "stable": true
+      }
+    },
+    {
+      "name": "⚠️ 同轮内互相翻转的两条规则仍然收敛：整轮结果不变就是不动点",
+      "_note": [
+        "flip 在一轮内被翻成 1 又被翻回 0，整轮结束时与轮初相同，因此判定为已收敛。",
+        "这是同轮顺序执行的直接结果，容易误以为「互相翻转必然不收敛」——",
+        "真正不收敛要求整轮函数的周期大于 1，见下一条用例。",
+        "两端的判定必须一致，所以这条也要钉住。"
+      ],
+      "trigger": "CHANGE",
+      "data": { "flip": 0 },
+      "rules": [
+        {
+          "id": "up",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "flip", "operator": "EQ", "value": 0 }] },
+          "then": [{ "type": "SET_VALUE", "target": "flip", "payload": { "value": 1 } }]
+        },
+        {
+          "id": "down",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "flip", "operator": "EQ", "value": 1 }] },
+          "then": [{ "type": "SET_VALUE", "target": "flip", "payload": { "value": 0 } }]
+        }
+      ],
+      "expect": { "data": { "flip": 0 }, "stable": true }
+    },
+    {
+      "name": "⚠️ 三段环形赋值真的不收敛，stable=false 但不抛异常",
+      "_note": [
+        "规则声明顺序是 a==2→0、a==1→2、a==0→1，起始 a=0。",
+        "逐轮结果：1 → 2 → 1 → 2 …… 整轮函数周期为 2，永远不会与轮初相同。",
+        "达到 maxPasses 后停止并标记 stable=false —— 不抛异常，",
+        "一条配歪的规则不该让整个提交流程失败。"
+      ],
+      "trigger": "CHANGE",
+      "data": { "a": 0 },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "a", "operator": "EQ", "value": 2 }] },
+          "then": [{ "type": "SET_VALUE", "target": "a", "payload": { "value": 0 } }]
+        },
+        {
+          "id": "r2",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "a", "operator": "EQ", "value": 1 }] },
+          "then": [{ "type": "SET_VALUE", "target": "a", "payload": { "value": 2 } }]
+        },
+        {
+          "id": "r3",
+          "trigger": "CHANGE",
+          "when": { "logic": "AND", "items": [{ "field": "a", "operator": "EQ", "value": 0 }] },
+          "then": [{ "type": "SET_VALUE", "target": "a", "payload": { "value": 1 } }]
+        }
+      ],
+      "expect": { "stable": false }
+    },
+
+    {
+      "name": "引用不存在的字段：条件按未满足处理，不抛错",
+      "trigger": "CHANGE",
+      "data": {},
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "notExists", "operator": "EQ", "value": "x" }]
+          },
+          "then": [{ "type": "REQUIRE", "target": "y" }],
+          "otherwise": [{ "type": "OPTIONAL", "target": "y" }]
+        }
+      ],
+      "expect": { "state": { "y": { "required": false } }, "stable": true }
+    },
+    {
+      "name": "动作缺少 target 时整条动作被忽略，其余动作照常执行",
+      "trigger": "CHANGE",
+      "data": {},
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [
+            { "type": "HIDE", "target": "" },
+            { "type": "HIDE", "target": "good" }
+          ]
+        }
+      ],
+      "expect": { "state": { "good": { "visible": false } }, "stable": true }
+    },
+    {
+      "name": "未知的操作符按不满足处理",
+      "trigger": "CHANGE",
+      "data": { "a": 1 },
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": {
+            "logic": "AND",
+            "items": [{ "field": "a", "operator": "NOT_A_REAL_OPERATOR", "value": 1 }]
+          },
+          "then": [{ "type": "REQUIRE", "target": "y" }]
+        }
+      ],
+      "expect": { "state": { "y": { "required": false } }, "stable": true }
+    },
+    {
+      "name": "未知的动作类型被忽略",
+      "trigger": "CHANGE",
+      "data": {},
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "CHANGE",
+          "when": null,
+          "then": [
+            { "type": "NOT_A_REAL_ACTION", "target": "x" },
+            { "type": "HIDE", "target": "y" }
+          ]
+        }
+      ],
+      "expect": { "state": { "y": { "visible": false } }, "stable": true }
+    },
+    {
+      "name": "基础状态里的 required 被保留（来自控件的 $required）",
+      "trigger": "CHANGE",
+      "data": {},
+      "baseState": { "mustFill": { "required": true } },
+      "rules": [],
+      "expect": { "state": { "mustFill": { "required": true } }, "stable": true }
+    },
+    {
+      "name": "⚠️ 隐藏字段同时失去可编辑性：隐藏了还能提交值就是绕过入口",
+      "trigger": "SUBMIT",
+      "data": {},
+      "rules": [
+        {
+          "id": "r1",
+          "trigger": "SUBMIT",
+          "when": null,
+          "then": [{ "type": "HIDE", "target": "secret" }]
+        }
+      ],
+      "expect": {
+        "state": { "secret": { "visible": false, "editable": false } },
+        "stable": true
+      }
+    }
+  ]
+}

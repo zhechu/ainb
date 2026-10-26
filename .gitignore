@@ -1,0 +1,67 @@
+######################################################################
+# Build Tools
+
+.gradle
+/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+.flattened-pom.xml
+
+######################################################################
+# IDE
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+nbproject/private/
+build/*
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+######################################################################
+# Others
+*.log
+*.xml.versionsBackup
+*.swp
+
+!*/build/*.java
+!*/build/*.html
+!*/build/*.xml
+
+### JRebel ###
+rebel.xml
+
+application-my.yaml
+
+/ainb-ui-app/unpackage/
+.DS_Store
+**/.DS_Store
+# Playwright 在本仓库误跑时留下的产物（e2e 属于前端仓库）
+test-results/
+
+# 调试脚本取到的登录令牌，本地产物，绝不入库
+token.txt
+
+# 迭代轮的实测证据（mvn/后端日志、变异探针记录、HTTP fixture），按 G-9「证据落仓外、只摘要入 git」。
+# 🔴 这一条不是洁癖：_logs 里的后端日志原样含着【匿名 webhook 打进来的完整请求体】，
+#    其中就有本轮做注入实测用的 ZWSP(U+200B) / RLO(U+202E) 等不可信载荷 ——
+#    一旦误入库，等于把提示注入样本永久写进 git 历史，且体积是几十 MB 级。
+#    此前它只是「没人 git add 过」而非「被忽略」，任何一次 git add -A 都会扫进来。
+_logs/

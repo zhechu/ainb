@@ -1,0 +1,2 @@
+cn.enlev.ainb.framework.quartz.config.EnlevQuartzAutoConfiguration
+cn.enlev.ainb.framework.quartz.config.EnlevAsyncAutoConfiguration

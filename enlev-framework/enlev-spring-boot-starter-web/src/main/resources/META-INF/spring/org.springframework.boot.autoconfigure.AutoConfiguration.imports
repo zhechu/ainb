@@ -1,0 +1,7 @@
+cn.enlev.ainb.framework.apilog.config.EnlevApiLogAutoConfiguration
+cn.enlev.ainb.framework.jackson.config.EnlevJacksonAutoConfiguration
+cn.enlev.ainb.framework.swagger.config.EnlevSwaggerAutoConfiguration
+cn.enlev.ainb.framework.web.config.EnlevWebAutoConfiguration
+cn.enlev.ainb.framework.xss.config.EnlevXssAutoConfiguration
+cn.enlev.ainb.framework.banner.config.EnlevBannerAutoConfiguration
+cn.enlev.ainb.framework.encrypt.config.EnlevApiEncryptAutoConfiguration

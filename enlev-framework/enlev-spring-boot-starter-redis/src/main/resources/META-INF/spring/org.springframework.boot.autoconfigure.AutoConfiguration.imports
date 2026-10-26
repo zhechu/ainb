@@ -1,0 +1,2 @@
+cn.enlev.ainb.framework.redis.config.EnlevRedisAutoConfiguration
+cn.enlev.ainb.framework.redis.config.EnlevCacheAutoConfiguration

@@ -1,0 +1,36 @@
+package cn.enlev.ainb.module.ai.framework.ai.core.model.image;
+
+import cn.enlev.ainb.module.ai.framework.ai.core.VendorApiKeys;
+import cn.enlev.ainb.module.ai.framework.ai.core.model.siliconflow.SiliconFlowImageApi;
+import cn.enlev.ainb.module.ai.framework.ai.core.model.siliconflow.SiliconFlowImageModel;
+import cn.enlev.ainb.module.ai.framework.ai.core.model.siliconflow.SiliconFlowImageOptions;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.springframework.ai.image.ImagePrompt;
+import org.springframework.ai.image.ImageResponse;
+
+/**
+ * {@link SiliconFlowImageModel} 集成测试
+ */
+public class SiliconFlowImageModelTests {
+
+    private final SiliconFlowImageModel imageModel = new SiliconFlowImageModel(
+            new SiliconFlowImageApi(VendorApiKeys.of("SILICONFLOW_API_KEY")) // 密钥
+    );
+
+    @Test
+    @Disabled
+    public void testCall() {
+        // 准备参数
+        SiliconFlowImageOptions imageOptions = SiliconFlowImageOptions.builder()
+                .model("Kwai-Kolors/Kolors")
+                .build();
+        ImagePrompt prompt = new ImagePrompt("万里长城", imageOptions);
+
+        // 方法调用
+        ImageResponse response = imageModel.call(prompt);
+        // 打印结果
+        System.out.println(response);
+    }
+
+}

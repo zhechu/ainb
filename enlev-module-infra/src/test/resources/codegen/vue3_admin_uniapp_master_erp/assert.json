@@ -1,0 +1,73 @@
+[ {
+  "contentPath" : "java/InfraStudentPageReqVO",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/controller/admin/demo/vo/InfraStudentPageReqVO.java"
+}, {
+  "contentPath" : "java/InfraStudentRespVO",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/controller/admin/demo/vo/InfraStudentRespVO.java"
+}, {
+  "contentPath" : "java/InfraStudentSaveReqVO",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/controller/admin/demo/vo/InfraStudentSaveReqVO.java"
+}, {
+  "contentPath" : "java/InfraStudentController",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/controller/admin/demo/InfraStudentController.java"
+}, {
+  "contentPath" : "java/InfraStudentDO",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/dal/dataobject/demo/InfraStudentDO.java"
+}, {
+  "contentPath" : "java/InfraStudentContactDO",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/dal/dataobject/demo/InfraStudentContactDO.java"
+}, {
+  "contentPath" : "java/InfraStudentTeacherDO",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/dal/dataobject/demo/InfraStudentTeacherDO.java"
+}, {
+  "contentPath" : "java/InfraStudentMapper",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/dal/mysql/demo/InfraStudentMapper.java"
+}, {
+  "contentPath" : "java/InfraStudentContactMapper",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/dal/mysql/demo/InfraStudentContactMapper.java"
+}, {
+  "contentPath" : "java/InfraStudentTeacherMapper",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/dal/mysql/demo/InfraStudentTeacherMapper.java"
+}, {
+  "contentPath" : "xml/InfraStudentMapper",
+  "filePath" : "enlev-module-infra/src/main/resources/mapper/demo/InfraStudentMapper.xml"
+}, {
+  "contentPath" : "java/InfraStudentServiceImpl",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/service/demo/InfraStudentServiceImpl.java"
+}, {
+  "contentPath" : "java/InfraStudentService",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/service/demo/InfraStudentService.java"
+}, {
+  "contentPath" : "java/InfraStudentServiceImplTest",
+  "filePath" : "enlev-module-infra/src/test/java/cn/enlev/ainb/module/infra/service/demo/InfraStudentServiceImplTest.java"
+}, {
+  "contentPath" : "java/ErrorCodeConstants_手动操作",
+  "filePath" : "enlev-module-infra/src/main/java/cn/enlev/ainb/module/infra/enums/ErrorCodeConstants_手动操作.java"
+}, {
+  "contentPath" : "sql/sql",
+  "filePath" : "sql/sql.sql"
+}, {
+  "contentPath" : "sql/h2",
+  "filePath" : "sql/h2.sql"
+}, {
+  "contentPath" : "ts/index",
+  "filePath" : "ainb-ui-admin-uniapp/src/api/infra/demo/index.ts"
+}, {
+  "contentPath" : "vue/index",
+  "filePath" : "ainb-ui-admin-uniapp/src/pages-infra/demo/index.vue"
+}, {
+  "contentPath" : "vue/search-form",
+  "filePath" : "ainb-ui-admin-uniapp/src/pages-infra/demo/components/search-form.vue"
+}, {
+  "contentPath" : "vue/form/index",
+  "filePath" : "ainb-ui-admin-uniapp/src/pages-infra/demo/form/index.vue"
+}, {
+  "contentPath" : "vue/detail/index",
+  "filePath" : "ainb-ui-admin-uniapp/src/pages-infra/demo/detail/index.vue"
+}, {
+  "contentPath" : "vue/student-contact/form/index",
+  "filePath" : "ainb-ui-admin-uniapp/src/pages-infra/demo/student-contact/form/index.vue"
+}, {
+  "contentPath" : "vue/student-teacher/form/index",
+  "filePath" : "ainb-ui-admin-uniapp/src/pages-infra/demo/student-teacher/form/index.vue"
+} ]

@@ -1,0 +1,160 @@
+{
+  "_comment": [
+    "列格式化契约 —— 列表怎么显示，导出就怎么导。",
+    "",
+    "## 为什么需要它",
+    "",
+    "列表的格式化逻辑原本只在前端（components/FormWidgets/listCell.ts），",
+    "而导出在后端。「照列表导出」意味着后端要再实现一遍同样的规则 ——",
+    "两份实现必然漂移，而漂移的表现是：前端给字典列加了个新格式化，",
+    "导出那边不知道，于是列表显示正常、导出是原始编码。",
+    "又一个「配了但不生效」。",
+    "",
+    "所以规则抽成这份声明式契约，两端各自实现、共用一份声明，",
+    "靠一致性测试守住。与 form-widget-contracts.json 是同一个模式。",
+    "",
+    "## 导出的两种模式",
+    "",
+    "- TEXT            出一个字符串。字典、布尔这类 Excel 没有「显示映射」的只能这样",
+    "- VALUE_WITH_FMT  出【真值 + 数字格式】。金额、百分比、日期走这条 ——",
+    "                  Excel 里「显示格式」与「值」本来就是两层，",
+    "                  于是「看起来和列表一样」与「导出的文件能改完导回来」同时成立",
+    "",
+    "## ⚠️ 两处故意不跟随列表",
+    "",
+    "1. LINK：列表显示 linkText（如「打开」），导出【URL 原文】。",
+    "   一列全是「打开」在 Excel 里没有任何信息量，而且导不回来。",
+    "   Excel 自己会把 http:// 开头的文本变成可点链接。",
+    "2. IMAGE / FILE：列表显示缩略图 / 文件名，导出【URL】。",
+    "   文件名不唯一也定位不到文件，导回来就断了。",
+    "",
+    "同值单元格合并与树形缩进不在本契约内 —— 它们是行级视图形态，不是列格式化。",
+    "两者在导出时的处理见 FormDesignRuntimeServiceImpl#exportExcel 的注释。",
+    "",
+    "## 同步",
+    "",
+    "规范副本是后端这份，改完原样 cp 到前端，见同目录 SYNC.md。"
+  ],
+  "contractVersion": 1,
+
+  "emptyCell": "-",
+
+  "numberFormat": {
+    "_comment": [
+      "数字类 numFmt 的拼装规则。两端按同一套规则拼，不各写各的。",
+      "precision=2 且 thousands=true → '#,##0' + '.' + '00' = '#,##0.00'",
+      "precision=0 且 thousands=false → '0'"
+    ],
+    "integer": "0",
+    "integerThousands": "#,##0",
+    "decimalSeparator": ".",
+    "decimalDigit": "0",
+    "defaultPrecision": 2
+  },
+
+  "booleanText": {
+    "trueText": "是",
+    "falseText": "否",
+    "_comment": "这几个值判为真，其余一律为假。与 listCell.ts 的 formatCellText 一致",
+    "trueValues": [true, 1, "1"]
+  },
+
+  "formatters": [
+    {
+      "type": "NONE",
+      "label": "无格式化",
+      "export": { "mode": "TEXT", "source": "RAW" }
+    },
+    {
+      "type": "DICT",
+      "label": "字典翻译",
+      "export": { "mode": "TEXT", "source": "DICT_LABEL" }
+    },
+    {
+      "type": "TAG",
+      "label": "标签",
+      "_comment": [
+        "标签上印的就是字典翻译后的文字，导出与 DICT 同。",
+        "",
+        "⚠️ 标签【颜色】不导出，fillByDictColor 固定 false。两个原因：",
+        "1. 跨模块拿不到颜色 —— DictDataRespDTO（framework 的公共 DTO）只有 label/value/dictType/status，",
+        "   没有 colorType。要拿得直接查 system_dict_data，而那违反「跨模块只走 api 层」的约定。",
+        "2. 就算拿得到，Element Plus 的 success/warning/danger/info/primary 到 Excel 填充色",
+        "   还要再维护一份映射 —— 又一个会漂的地方，而颜色不承载数据。",
+        "",
+        "保留这个字段而不是删掉，是为了让「不导颜色」是一个被记录过的决定。"
+      ],
+      "export": { "mode": "TEXT", "source": "DICT_LABEL", "fillByDictColor": false }
+    },
+    {
+      "type": "DATE",
+      "label": "日期",
+      "export": { "mode": "VALUE_WITH_FMT", "valueKind": "DATE", "numFmt": "yyyy-mm-dd" }
+    },
+    {
+      "type": "DATETIME",
+      "label": "日期时间",
+      "export": { "mode": "VALUE_WITH_FMT", "valueKind": "DATETIME", "numFmt": "yyyy-mm-dd hh:mm:ss" }
+    },
+    {
+      "type": "NUMBER",
+      "label": "数字",
+      "export": { "mode": "VALUE_WITH_FMT", "valueKind": "NUMBER", "numFmtFrom": "numberFormat" }
+    },
+    {
+      "type": "PERCENT",
+      "label": "百分比",
+      "_comment": [
+        "⚠️ Excel 的 % 格式会把单元格值【自动乘 100】显示。",
+        "所以真值必须是小数（0.13 显示成 13.00%）。",
+        "列配了 alreadyScaled=true（库里存的是 13 而不是 0.13）时，",
+        "导出要先【除以 100】再写 —— 不除的话会显示 1300.00%。"
+      ],
+      "export": {
+        "mode": "VALUE_WITH_FMT",
+        "valueKind": "NUMBER",
+        "numFmtFrom": "numberFormat",
+        "numFmtSuffix": "%",
+        "divideBy100WhenAlreadyScaled": true
+      }
+    },
+    {
+      "type": "BOOLEAN",
+      "label": "布尔值",
+      "export": { "mode": "TEXT", "source": "BOOLEAN_TEXT" }
+    },
+    {
+      "type": "LINK",
+      "label": "超链接",
+      "_comment": "故意不跟随列表的 linkText，理由见文件头",
+      "export": { "mode": "TEXT", "source": "RAW", "followsList": false }
+    },
+    {
+      "type": "IMAGE",
+      "label": "图片",
+      "_comment": "故意不跟随列表的缩略图，理由见文件头",
+      "export": { "mode": "TEXT", "source": "FILE_URL", "followsList": false }
+    },
+    {
+      "type": "FILE",
+      "label": "附件",
+      "_comment": "故意不跟随列表的文件名，理由见文件头",
+      "export": { "mode": "TEXT", "source": "FILE_URL", "followsList": false }
+    }
+  ],
+
+  "rowKinds": {
+    "_comment": [
+      "列表上除数据行之外还有几种「视图产物」行。导出要跟随，",
+      "但它们【不是数据】—— 同一份文件导回来时必须被识别并跳过，",
+      "否则合计行会被当成一条记录，报「供应商编码是必填项」。",
+      "",
+      "识别办法：首列（序号列之后的第一列）等于下面这些标记文本。",
+      "用标记文本而不是「关键列为空」来判，是因为后者会把用户真的漏填编码的行",
+      "一起跳过 —— 那一行本该报错。"
+    ],
+    "summaryLabel": "合计",
+    "groupLabelPrefix": "▸ ",
+    "skipOnImport": true
+  }
+}
